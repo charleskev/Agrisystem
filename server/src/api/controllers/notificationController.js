@@ -1,5 +1,5 @@
 import { getFarmerByUserId, listFarmers } from "../models/farmerModel.js";
-import { createNotifications, listNotifications, markRead } from "../models/notificationModel.js";
+import { createNotifications, listNotifications, listSentNotifications, markRead } from "../models/notificationModel.js";
 import { sendFarmerNotificationSms } from "../services/smsService.js";
 import { sendFarmerNotificationEmails } from "../services/emailService.js";
 import { publishRealtimeUpdate } from "../services/realtimeService.js";
@@ -8,6 +8,15 @@ const normalizeBarangay = value => String(value || "").trim().toLowerCase().repl
 
 export async function mine(req, res, next) {
   try { const profile = await getFarmerByUserId(req.user.id); res.json({ notifications: profile ? await listNotifications(profile.id) : [] }); } catch (error) { next(error); }
+}
+export async function sent(req, res, next) {
+  try { res.json({ announcements: await listSentNotifications(req.user.id) }); } catch (error) { next(error); }
+}
+export async function recipients(req, res, next) {
+  try {
+    const farmers = await listFarmers("approved");
+    res.json({ recipients: farmers.map(({ id, full_name, barangay }) => ({ id, full_name, barangay })) });
+  } catch (error) { next(error); }
 }
 export async function send(req, res, next) {
   try {
@@ -25,7 +34,7 @@ export async function send(req, res, next) {
     try { sms = await sendFarmerNotificationSms(recipients, message); } catch { sms = { status: "failed", recipients: 0 }; }
     let email = { status: "not_configured", recipients: 0 };
     try { email = await sendFarmerNotificationEmails(recipients, message, type); } catch { email = { status: "failed", recipients: 0 }; }
-    const smsMessage = sms.status === "queued" ? ` SMS queued for ${sms.recipients} registered mobile number${sms.recipients === 1 ? "" : "s"}.` : sms.status === "not_configured" ? " Dashboard notifications were sent; SMS delivery is not configured yet." : sms.status === "no_valid_numbers" ? " Dashboard notifications were sent; no valid Philippine mobile number was available for SMS." : " Dashboard notifications were sent; the SMS gateway could not accept this batch.";
+    const smsMessage = ["accepted", "sent_to_network", "queued"].includes(sms.status) ? ` SMS accepted by the provider for ${sms.recipients} registered mobile number${sms.recipients === 1 ? "" : "s"}; delivery is not confirmed.` : sms.status === "not_configured" ? " Dashboard notifications were sent; SMS delivery is not configured yet." : sms.status === "no_valid_numbers" ? " Dashboard notifications were sent; no valid Philippine mobile number was available for SMS." : " Dashboard notifications were sent; the SMS gateway could not accept this batch.";
     const emailMessage = email.status === "sent" ? ` Email sent to ${email.recipients} registered Gmail/email address${email.recipients === 1 ? "" : "es"}.` : email.status === "not_configured" ? " Email delivery is not configured yet." : email.status === "no_email" ? " No recipient email address was available." : " Some or all email deliveries failed.";
     res.status(201).json({ count, sms, email, message: `Notification sent to ${count} approved farmer${count === 1 ? "" : "s"}.${smsMessage}${emailMessage}` });
   } catch (error) { next(error); }

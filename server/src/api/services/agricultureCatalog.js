@@ -1,9 +1,9 @@
 // Reference taxonomy for the vision prompt. It supplies vocabulary only; it is
 // never evidence and the model is told to return Unknown when image evidence is weak.
 export const agricultureCatalog = [
-  ["Rice", "Palay", "Oryza sativa", "field crop"], ["Corn", "Mais", "Zea mays", "field crop"], ["Sugarcane", "TubÃ³", "Saccharum officinarum", "field crop"],
+  ["Rice", "Palay", "Oryza sativa", "field crop"], ["Corn", "Mais", "Zea mays", "field crop"], ["Sugarcane", "Tubó", "Saccharum officinarum", "field crop"],
   ["Coconut", "Niyog", "Cocos nucifera", "tree crop"], ["Banana", "Saging", "Musa spp.", "fruit"], ["Mango", "Mangga", "Mangifera indica", "tree crop"],
-  ["Pineapple", "Pinya", "Ananas comosus", "fruit"], ["Papaya", "Papaya", "Carica papaya", "fruit"], ["Calamansi", "Kalamansi", "Citrus Ã— microcarpa", "fruit"],
+  ["Pineapple", "Pinya", "Ananas comosus", "fruit"], ["Papaya", "Papaya", "Carica papaya", "fruit"], ["Calamansi", "Kalamansi", "Citrus × microcarpa", "fruit"],
   ["Pomelo", "Suha", "Citrus maxima", "fruit"], ["Lime", "Dayap", "Citrus aurantiifolia", "fruit"], ["Avocado", "Abokado", "Persea americana", "fruit"],
   ["Watermelon", "Pakwan", "Citrullus lanatus", "fruit"], ["Melon", "Melon", "Cucumis melo", "fruit"], ["Dragon fruit", "Pitaya", "Selenicereus undatus", "fruit"],
   ["Jackfruit", "Langka", "Artocarpus heterophyllus", "tree crop"], ["Guava", "Bayabas", "Psidium guajava", "fruit"], ["Rambutan", "Rambutan", "Nephelium lappaceum", "fruit"],

@@ -1,7 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#075b43"/>
-  <path d="M104 356c34-127 104-190 215-194-10 89-57 170-170 194-21 5-33 5-45 0Z" fill="#b6ed57"/>
-  <path d="M154 383c61-94 119-142 200-174" fill="none" stroke="#f7fde9" stroke-linecap="round" stroke-width="24"/>
-  <path d="M322 128c11 35 4 70-19 102-19-17-33-39-38-66 15-20 34-26 57-17Z" fill="#f6cd61"/>
-  <text x="256" y="452" fill="#fff" font-family="Arial,sans-serif" font-size="52" font-weight="700" text-anchor="middle">MAO</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
+  <circle cx="48" cy="48" r="46" fill="#F8FAF7" stroke="#0A5C43" stroke-width="4"/>
+  <circle cx="48" cy="48" r="38" fill="#075B43"/>
+  <path d="M18 58c10-9 20-13 30-13s20 4 30 13v14H18V58Z" fill="#1E9366"/>
+  <path d="M18 67c10-7 20-10.5 30-10.5S68 60 78 67v5H18v-5Z" fill="#B9DE5F"/>
+  <path d="M47.8 23.5c-8.6 9.7-11.3 21.4-7.8 35.1M48.2 23.5c8.6 9.7 11.3 21.4 7.8 35.1M34.7 33.5c7.8.3 12.7 4.1 14.3 10.9-7.3.4-12.1-3.2-14.3-10.9ZM61.3 33.5c-7.8.3-12.7 4.1-14.3 10.9 7.3.4 12.1-3.2 14.3-10.9Z" stroke="#F6CD61" stroke-linecap="round" stroke-linejoin="round" stroke-width="3"/>
+  <path d="M30 75h36" stroke="#F8FAF7" stroke-linecap="round" stroke-width="3"/>
 </svg>

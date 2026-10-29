@@ -1,9 +1,12 @@
 import { Router } from "express";
-import { addLand, myProfile } from "../controllers/farmerController.js";
+import { addLand, editLand, landMeasurementHistory, myProfile, removeLand } from "../controllers/farmerController.js";
 import { authenticate, allowRoles } from "../middleware/auth.js";
 import { uploadOwnershipProof } from "../middleware/upload.js";
 const router = Router();
 router.use(authenticate, allowRoles("farmer"));
 router.get("/me", myProfile);
 router.post("/lands", uploadOwnershipProof, addLand);
+router.patch("/lands/:id", editLand);
+router.delete("/lands/:id", removeLand);
+router.get("/lands/:id/measurements", landMeasurementHistory);
 export default router;

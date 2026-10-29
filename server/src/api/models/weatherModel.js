@@ -1,7 +1,7 @@
 import { pool } from "../../config/db.js";
 
 export async function getLand(id) {
-  const [rows] = await pool.query("SELECT id, latitude, longitude FROM lands WHERE id = ?", [id]);
+  const [rows] = await pool.query("SELECT id, name, latitude, longitude, mapped_at FROM lands WHERE id = ?", [id]);
   return rows[0] || null;
 }
 

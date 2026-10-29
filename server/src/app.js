@@ -12,6 +12,7 @@ import dashboardRoutes from "./api/routes/dashboardRoutes.js";
 import adminRoutes from "./api/routes/adminRoutes.js";
 import weatherRoutes from "./api/routes/weatherRoutes.js";
 import visionRoutes from "./api/routes/visionRoutes.js";
+import cropDetectionRoutes from "./api/routes/cropDetectionRoutes.js";
 import realtimeRoutes from "./api/routes/realtimeRoutes.js";
 import { pool } from "./config/db.js";
 
@@ -32,7 +33,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/uploads", express.static(uploadsPath));
 app.get("/health", async (_req, res) => {
   try { await pool.query("SELECT 1"); res.json({ status: "ok", database: "connected" }); }
-  catch (error) { res.status(503).json({ status: "degraded", database: "unavailable", message: "PostgreSQL is not available. Start PostgreSQL and run the database migration." }); }
+  catch (error) { res.status(503).json({ status: "degraded", database: "unavailable", message: "MySQL is not available. Start MySQL and run the database migration." }); }
 });
 app.use("/api/auth", authRoutes);
 app.use("/api/farmers", farmerRoutes);
@@ -42,6 +43,7 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/weather", weatherRoutes);
 app.use("/api/vision", visionRoutes);
+app.use("/api/crop-detections", cropDetectionRoutes);
 app.use("/api/realtime", realtimeRoutes);
 if (fs.existsSync(clientDistPath)) {
   app.use(express.static(clientDistPath));
