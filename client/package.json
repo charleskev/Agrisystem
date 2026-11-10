@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
     "@tensorflow-models/coco-ssd": "^2.2.3",
     "@tensorflow/tfjs": "^4.22.0",
     "leaflet": "^1.9.4",
@@ -17,6 +19,7 @@
     "react-leaflet": "^4.2.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.6.0",
     "@vitejs/plugin-react": "^6.2.1",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.41",
