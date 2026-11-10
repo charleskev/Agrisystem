@@ -21,13 +21,25 @@ dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
 const app = express();
 const port = Number(process.env.PORT) || 4000;
+const allowedClientOrigins = new Set([
+  ...(process.env.CLIENT_ORIGIN || "http://localhost:5173")
+    .split(",")
+    .map(origin => origin.trim().replace(/\/+$/, ""))
+    .filter(Boolean),
+  // Capacitor serves its bundled Android app from this secure WebView origin.
+  "https://localhost",
+  "capacitor://localhost"
+]);
 // Multer runs from the server workspace and stores farmer evidence in server/uploads.
 // Serve that same directory so report photos and registration documents resolve correctly.
 const uploadsPath = path.resolve(__dirname, "../uploads");
 const clientDistPath = path.resolve(__dirname, "../../client/dist");
 fs.mkdirSync(uploadsPath, { recursive: true });
 
-app.use(cors({ origin: process.env.CLIENT_ORIGIN || "http://localhost:5173" }));
+app.use(cors({ origin(origin, callback) {
+  if (!origin || allowedClientOrigins.has(origin)) return callback(null, true);
+  return callback(new Error("Origin is not allowed by CORS."));
+} }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use("/uploads", express.static(uploadsPath));
