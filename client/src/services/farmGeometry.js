@@ -17,6 +17,8 @@ export function measureBoundary(points) {
   if (!Array.isArray(points) || points.length < 3 || points.length > 2000) throw new Error("A farm boundary must contain between 3 and 2,000 points.");
   let ring = points.map(point => ({ latitude: Number(point.latitude), longitude: Number(point.longitude) }));
   if (ring.some(point => !Number.isFinite(point.latitude) || !Number.isFinite(point.longitude) || point.latitude < -90 || point.latitude > 90 || point.longitude < -180 || point.longitude > 180)) throw new Error("Boundary points need valid longitude and latitude coordinates.");
+  let walkingDistanceMeters = 0;
+  for (let i = 1; i < ring.length; i += 1) walkingDistanceMeters += distance(ring[i - 1], ring[i]);
   if (distance(ring[0], ring.at(-1)) < 0.01) ring.pop();
   const distinct = [];
   for (const point of ring) if (!distinct.some(other => distance(other, point) < 1)) distinct.push(point);
@@ -41,7 +43,7 @@ export function measureBoundary(points) {
   const areaSquareMeters = Math.abs(sum) * radius ** 2 / 2;
   if (!Number.isFinite(areaSquareMeters) || areaSquareMeters < 4 || areaSquareMeters > 5_000_000_000) throw new Error("The measured boundary area is too small or too large to save. Check the points and map scale.");
   const center = ring.reduce((result, point) => ({ latitude: result.latitude + point.latitude / ring.length, longitude: result.longitude + point.longitude / ring.length }), { latitude: 0, longitude: 0 });
-  return { ...center, areaSquareMeters, areaHectares: areaSquareMeters / 10000, areaAcres: areaSquareMeters / 4046.8564224, perimeterMeters };
+  return { ...center, areaSquareMeters, areaHectares: areaSquareMeters / 10000, areaAcres: areaSquareMeters / 4046.8564224, perimeterMeters, walkingDistanceMeters };
 }
 
 export { distance as distanceBetweenPoints };

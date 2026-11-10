@@ -1,0 +1,11 @@
+import { Router } from "express";
+import { myReports, reports, review, submitReport } from "../controllers/reportController.js";
+import { authenticate, allowRoles } from "../middleware/auth.js";
+import { uploadReportPhotos } from "../middleware/upload.js";
+const router = Router();
+router.use(authenticate);
+router.get("/mine", allowRoles("farmer"), myReports);
+router.post("/", allowRoles("farmer"), uploadReportPhotos, submitReport);
+router.get("/", allowRoles("staff", "technician", "admin"), reports);
+router.patch("/:id/review", allowRoles("staff", "technician", "admin"), review);
+export default router;

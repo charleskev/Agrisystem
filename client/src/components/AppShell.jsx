@@ -101,8 +101,7 @@ export default function AppShell({ role = "farmer", children, onLogout }) {
     <header className="app-header sticky top-0 z-30 border-b text-white">
       <div className={`app-header-inner flex items-center justify-between gap-4 px-4 sm:px-6 lg:px-7 ${isAdmin ? "max-w-none" : "mx-auto max-w-[1600px]"}`}>
         <a href={home} className="app-brand flex min-w-0 items-center" aria-label="AgriSystem home">
-          <span className="app-brand-logo flex shrink-0 items-center justify-center overflow-hidden"><img src="/icons/agrisystem-icon.svg" alt="" className="h-full w-full object-contain"/></span>
-          <span className="app-brand-copy min-w-0"><span className="app-brand-heading flex min-w-0 items-center"><span className="app-brand-title block truncate font-extrabold"><span className="app-brand-agri">Agri</span><span className="app-brand-system">System</span></span></span></span>
+          <img src="/images/agrisystem-mao-logo.svg" alt="AgriSystem Municipal Agriculture Office" className="app-brand-logo"/>
         </a>
         <div className="app-header-actions">
           {isFarmer && <a href="#notifications" className="app-notification-link" aria-label={`Notifications, ${unreadNotifications} unread`} title="Notifications"><HeaderBell/>{unreadNotifications > 0 && <span className="app-notification-count">{unreadNotifications > 99 ? "99+" : unreadNotifications}</span>}</a>}

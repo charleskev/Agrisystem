@@ -6,10 +6,37 @@ import { normalizeCoordinates, readablePlaceName, resolveFarmerWeatherLand, weat
 
 const cachedWeather = new Map();
 const cachedPlaces = new Map();
+const cachedLocationSearches = new Map();
 const weatherCacheTtlMs = 5 * 60 * 1000;
 const maxStaleWeatherMs = 24 * 60 * 60 * 1000;
 let geocodeQueue = Promise.resolve();
 let lastGeocodeAt = 0;
+
+function geocoderEndpoint(path) {
+  const base = (process.env.NOMINATIM_BASE_URL || "https://nominatim.openstreetmap.org").replace(/\/+$/, "");
+  return new URL(`${base}/${path}`);
+}
+
+function queueGeocode(url) {
+  const lookup = geocodeQueue.then(async () => {
+    const delay = Math.max(0, 1000 - (Date.now() - lastGeocodeAt));
+    if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+    lastGeocodeAt = Date.now();
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(7000),
+      headers: {
+        Accept: "application/json",
+        "Accept-Language": "en",
+        "User-Agent": "SmartFarmAI-Weather/1.0",
+        Referer: process.env.CLIENT_ORIGIN || "http://localhost:5173",
+      },
+    });
+    if (!response.ok) throw new Error(`Place search service returned ${response.status}.`);
+    return response.json();
+  });
+  geocodeQueue = lookup.then(() => undefined, () => undefined);
+  return lookup;
+}
 
 export async function weatherForLand(req, res, next) {
   try {
@@ -80,36 +107,42 @@ async function reverseGeocode(latitude, longitude) {
   const cached = cachedPlaces.get(cacheKey);
   if (cached && Date.now() - cached.cachedAt < 24 * 60 * 60 * 1000) return cached.name;
 
-  const lookup = geocodeQueue.then(async () => {
-    const queuedCache = cachedPlaces.get(cacheKey);
-    if (queuedCache && Date.now() - queuedCache.cachedAt < 24 * 60 * 60 * 1000) return queuedCache.name;
-    const delay = Math.max(0, 1000 - (Date.now() - lastGeocodeAt));
-    if (delay) await new Promise(resolve => setTimeout(resolve, delay));
-    lastGeocodeAt = Date.now();
+  const url = geocoderEndpoint("reverse");
+  url.search = new URLSearchParams({ format: "jsonv2", lat: String(coarseLatitude), lon: String(coarseLongitude), zoom: "10", addressdetails: "1" });
+  try {
+    const result = await queueGeocode(url);
+    const name = readablePlaceName(result.address);
+    if (!name) return null;
+    if (cachedPlaces.size >= 1000) cachedPlaces.delete(cachedPlaces.keys().next().value);
+    cachedPlaces.set(cacheKey, { name, cachedAt: Date.now() });
+    return name;
+  } catch { return null; }
+}
 
-    const url = new URL("https://nominatim.openstreetmap.org/reverse");
-    url.search = new URLSearchParams({ format: "jsonv2", lat: String(coarseLatitude), lon: String(coarseLongitude), zoom: "10", addressdetails: "1" });
-    try {
-      const response = await fetch(url, {
-        signal: AbortSignal.timeout(7000),
-        headers: {
-          Accept: "application/json",
-          "Accept-Language": "en",
-          "User-Agent": "SmartFarmAI-Weather/1.0",
-          Referer: process.env.CLIENT_ORIGIN || "http://localhost:5173",
-        },
-      });
-      if (!response.ok) return null;
-      const result = await response.json();
-      const name = readablePlaceName(result.address);
-      if (!name) return null;
-      if (cachedPlaces.size >= 1000) cachedPlaces.delete(cachedPlaces.keys().next().value);
-      cachedPlaces.set(cacheKey, { name, cachedAt: Date.now() });
-      return name;
-    } catch { return null; }
-  });
-  geocodeQueue = lookup.then(() => undefined, () => undefined);
-  return lookup;
+export async function searchWeatherLocations(req, res, next) {
+  const query = String(req.query.q || "").trim().replace(/\s+/g, " ");
+  if (query.length < 2 || query.length > 120) return res.status(400).json({ message: "Enter a place name between 2 and 120 characters." });
+  const cacheKey = query.toLocaleLowerCase();
+  const cached = cachedLocationSearches.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < 24 * 60 * 60 * 1000) return res.json({ locations: cached.locations });
+
+  const url = geocoderEndpoint("search");
+  url.search = new URLSearchParams({ format: "jsonv2", q: query, limit: "5", addressdetails: "1" });
+  try {
+    const results = await queueGeocode(url);
+    const locations = results.map(item => {
+      const coordinates = normalizeCoordinates(item.lat, item.lon);
+      if (!coordinates) return null;
+      return { ...coordinates, label: readablePlaceName(item.address) || item.display_name || "Selected place" };
+    }).filter(Boolean);
+    if (cachedLocationSearches.size >= 500) cachedLocationSearches.delete(cachedLocationSearches.keys().next().value);
+    cachedLocationSearches.set(cacheKey, { locations, cachedAt: Date.now() });
+    res.json({ locations });
+  } catch (error) {
+    const unavailable = new Error("Place search is unavailable right now. Check your internet connection or try another place name.");
+    unavailable.status = 503;
+    next(unavailable);
+  }
 }
 
 export async function currentLocationWeather(req, res, next) {

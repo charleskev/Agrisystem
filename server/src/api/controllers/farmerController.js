@@ -13,7 +13,9 @@ function mappingFromBody(body) {
   const measured = measureFarmBoundary(parsed);
   const accuracy = body.gpsAccuracyM === "" || body.gpsAccuracyM == null ? null : Number(body.gpsAccuracyM);
   if (accuracy != null && (!Number.isFinite(accuracy) || accuracy < 0 || accuracy > 500)) throw Object.assign(new Error("GPS accuracy must be between 0 and 500 meters."), { status: 422 });
-  return { ...measured, gpsAccuracyM: accuracy, quality: accuracy == null ? "manual" : accuracy <= 10 ? "good" : accuracy <= 20 ? "fair" : "low" };
+  const suppliedWalkingDistance = body.walkingDistanceMeters === "" || body.walkingDistanceMeters == null ? measured.walkingDistanceMeters : Number(body.walkingDistanceMeters);
+  if (!Number.isFinite(suppliedWalkingDistance) || suppliedWalkingDistance < 0 || suppliedWalkingDistance > 5_000_000_000) throw Object.assign(new Error("Walking distance must be a valid measured value."), { status: 422 });
+  return { ...measured, walkingDistanceMeters: accuracy == null ? measured.walkingDistanceMeters : suppliedWalkingDistance, gpsAccuracyM: accuracy, quality: accuracy == null ? "manual" : accuracy <= 10 ? "good" : accuracy <= 20 ? "fair" : "low" };
 }
 
 function cropTypesFromBody(value) { return Array.isArray(value) ? value : String(value || "").split(",").map(item => item.trim()).filter(Boolean); }

@@ -23,6 +23,12 @@ export function measureFarmBoundary(input) {
     if (!Number.isFinite(longitude) || !Number.isFinite(latitude) || longitude < -180 || longitude > 180 || latitude < -90 || latitude > 90) throw Object.assign(new Error("Boundary points need valid longitude and latitude coordinates."), { status: 422 });
     return [longitude, latitude];
   });
+  let walkingDistanceMeters = 0;
+  for (let i = 1; i < ring.length; i += 1) {
+    const dLat = toRadians(ring[i][1] - ring[i - 1][1]), dLon = toRadians(ring[i][0] - ring[i - 1][0]);
+    const haversine = Math.sin(dLat / 2) ** 2 + Math.cos(toRadians(ring[i - 1][1])) * Math.cos(toRadians(ring[i][1])) * Math.sin(dLon / 2) ** 2;
+    walkingDistanceMeters += 2 * earthRadiusMeters * Math.asin(Math.min(1, Math.sqrt(haversine)));
+  }
   if (Math.hypot(ring[0][0] - ring.at(-1)[0], ring[0][1] - ring.at(-1)[1]) < 1e-9) ring.pop();
   const unique = [];
   for (const point of ring) if (!unique.some(other => Math.hypot((point[0] - other[0]) * 111320 * Math.cos(toRadians(point[1])), (point[1] - other[1]) * 111320) < 1)) unique.push(point);
@@ -56,6 +62,7 @@ export function measureFarmBoundary(input) {
     areaHectares: areaSquareMeters / 10_000,
     areaAcres: areaSquareMeters / 4_046.8564224,
     perimeterMeters: perimeter,
+    walkingDistanceMeters,
     longitude: center[0],
     latitude: center[1],
   };

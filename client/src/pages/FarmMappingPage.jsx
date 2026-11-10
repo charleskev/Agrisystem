@@ -14,7 +14,7 @@ const satelliteMaxZoom = 21;
 const satelliteMaxNativeZoom = 18;
 const streetTileUrl = import.meta.env.VITE_MAP_TILE_URL || "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 const satelliteTileUrl = import.meta.env.VITE_SATELLITE_TILE_URL || "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
-const button = "min-h-11 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-bold text-emerald-800 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50";
+const button = "!w-auto min-h-11 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-bold text-emerald-800 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50";
 const input = "mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900";
 
 function RecenterMap({ center, zoom, focusKey }) {
@@ -83,12 +83,16 @@ export default function FarmMappingPage({ token, onLogout }) {
   const [mapZoom, setMapZoom] = useState(6), [focusKey, setFocusKey] = useState(0), [mapLayer, setMapLayer] = useState("street"), [locating, setLocating] = useState(false);
   const [satelliteTileError, setSatelliteTileError] = useState(""), [satelliteLoading, setSatelliteLoading] = useState(false);
   const [recording, setRecording] = useState(false), [paused, setPaused] = useState(false), [manualMode, setManualMode] = useState(false), [movingPoint, setMovingPoint] = useState(null);
+  const [trackingStatus, setTrackingStatus] = useState("idle");
+  const [gpsWalkDistance, setGpsWalkDistance] = useState(0), [hasGpsTrack, setHasGpsTrack] = useState(false);
   const [accuracy, setAccuracy] = useState(null), [accuracySamples, setAccuracySamples] = useState([]), [gpsMessage, setGpsMessage] = useState("Location is off. Choose Start Mapping to request GPS access, or add points on the map manually.");
   const [gpsRetryAvailable, setGpsRetryAvailable] = useState(false), [gpsRetryKey, setGpsRetryKey] = useState(0), [locationConfirmation, setLocationConfirmation] = useState("");
   const [error, setError] = useState(""), [message, setMessage] = useState(""), [loading, setLoading] = useState(true), [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ name: "", barangay: "", municipality: "", province: "", region: "", cropTypes: "", address: "", notes: "" });
   const [measurement, setMeasurement] = useState(null);
   const watchId = useRef(null);
+  const lastAcceptedPosition = useRef(null);
+  const boundaryLengthRef = useRef(0);
   const initialFarmFocus = useRef(false);
   const handleSatelliteLoading = useCallback(() => setSatelliteLoading(true), []);
   const handleSatelliteLoaded = useCallback(() => setSatelliteLoading(false), []);
@@ -113,8 +117,10 @@ export default function FarmMappingPage({ token, onLogout }) {
     setFocusKey(key => key + 1);
   }, [lands, loading, selectedId]);
   useEffect(() => () => { if (watchId.current != null) navigator.geolocation?.clearWatch(watchId.current); }, []);
+  useEffect(() => { boundaryLengthRef.current = boundary.length; }, [boundary.length]);
 
   const calculated = useMemo(() => { try { return boundary.length >= 3 ? measureBoundary(boundary) : null; } catch { return null; } }, [boundary]);
+  const walkingDistanceMeters = useMemo(() => boundary.slice(1).reduce((sum, point, index) => sum + distanceBetweenPoints(boundary[index], point), 0), [boundary]);
   const boundaryCenter = calculated ? { latitude: calculated.latitude, longitude: calculated.longitude } : null;
   const locationFingerprint = useMemo(() => JSON.stringify({
     boundary: boundary.map(point => [point.latitude, point.longitude]),
@@ -125,35 +131,55 @@ export default function FarmMappingPage({ token, onLogout }) {
   const acceptPosition = useCallback(position => {
     const next = { latitude: position.coords.latitude, longitude: position.coords.longitude };
     const nextAccuracy = Number(position.coords.accuracy);
+    const timestamp = Number(position.timestamp) || Date.now();
+    if (!Number.isFinite(next.latitude) || !Number.isFinite(next.longitude) || next.latitude < -90 || next.latitude > 90 || next.longitude < -180 || next.longitude > 180) {
+      setGpsRetryAvailable(true); setTrackingStatus("error"); setGpsMessage("The phone returned invalid GPS coordinates. Check location services, then retry."); return;
+    }
     if (mapCenter === defaultMapCenter && !selectedId) {
       setMapCenter([next.latitude, next.longitude]); setMapZoom(18); setFocusKey(key => key + 1);
     }
     setCurrentPosition(next); setAccuracy(nextAccuracy);
-    if (!Number.isFinite(nextAccuracy) || nextAccuracy > 30) {
+    if (!Number.isFinite(nextAccuracy) || nextAccuracy > 20) {
       setGpsRetryAvailable(true);
-      setGpsMessage(`Device GPS reports ±${Number.isFinite(nextAccuracy) ? nextAccuracy.toFixed(1) : "unknown"} m accuracy. This fix is too imprecise to record; try again outdoors or use manual map points.`);
+      setTrackingStatus(recording && !paused ? "connecting" : "ready");
+      setGpsMessage(`Device GPS reports ±${Number.isFinite(nextAccuracy) ? nextAccuracy.toFixed(1) : "unknown"} m accuracy. Fixes worse than 20 m are not recorded; try again outdoors or use manual map points.`);
       return;
     }
     setGpsRetryAvailable(false);
-    setGpsMessage(`Device GPS reports ±${nextAccuracy.toFixed(1)} m accuracy.`);
-    if (!recording || paused) return;
+    if (!recording || paused) { setTrackingStatus("ready"); setGpsMessage(`GPS ready. Device reports ±${nextAccuracy.toFixed(1)} m accuracy.`); return; }
+    const previous = lastAcceptedPosition.current;
+    if (previous) {
+      const segmentMeters = distanceBetweenPoints(previous.point, next);
+      const elapsedSeconds = Math.max(0.5, (timestamp - previous.timestamp) / 1000);
+      const minimumStep = Math.max(6, Math.min(12, nextAccuracy * 0.5));
+      const maximumStep = Math.max(20, elapsedSeconds * 4 + Math.min(10, (previous.accuracy + nextAccuracy) / 2));
+      if (segmentMeters < minimumStep) return;
+      if (segmentMeters > maximumStep) {
+        setTrackingStatus("recording");
+        setGpsMessage(`Ignored a GPS jump of ${segmentMeters.toFixed(0)} m. Keep the map open while the phone settles on a reliable fix.`);
+        return;
+      }
+      setGpsWalkDistance(total => total + segmentMeters);
+    }
+    lastAcceptedPosition.current = { point: next, timestamp, accuracy: nextAccuracy };
+    setHasGpsTrack(true);
+    setTrackingStatus("recording");
+    setGpsMessage(`Recording boundary point. Device GPS reports ±${nextAccuracy.toFixed(1)} m accuracy.`);
     setAccuracySamples(samples => [...samples, nextAccuracy].slice(-100));
-    setBoundary(points => {
-      const previous = points.at(-1);
-      if (previous && distanceBetweenPoints(previous, next) < Math.max(4, nextAccuracy * 0.35)) return points;
-      return [...points, next];
-    });
+    if (boundaryLengthRef.current >= 2000) { setGpsMessage("The 2,000 point mapping limit was reached. Finish this boundary before recording more points."); return; }
+    setBoundary(points => [...points, next]);
   }, [mapCenter, paused, recording, selectedId]);
 
   useEffect(() => {
     if (!recording || paused) { if (watchId.current != null) navigator.geolocation?.clearWatch(watchId.current); watchId.current = null; return; }
-    if (!navigator.geolocation) { setGpsMessage("This browser does not provide location services. Use manual map points instead."); setGpsRetryAvailable(true); setRecording(false); return; }
+    if (!navigator.geolocation) { setGpsMessage("This browser does not provide location services. Use manual map points instead."); setGpsRetryAvailable(true); setTrackingStatus("error"); setRecording(false); return; }
+    setTrackingStatus("connecting");
     setGpsMessage("Requesting location permission. Keep this page open while walking around the boundary.");
     watchId.current = navigator.geolocation.watchPosition(acceptPosition, geoError => {
       setGpsRetryAvailable(true);
-      if (geoError.code === 1) { setGpsMessage("Location permission was denied. Allow location access in your browser, then try GPS again, or use manual map mode."); setRecording(false); }
-      else if (geoError.code === 3) setGpsMessage("GPS is taking too long. Move outdoors and retry, or continue with manual map points.");
-      else setGpsMessage("GPS signal is unavailable. Check your device location setting and retry, or use manual map mode.");
+      if (geoError.code === 1) { setGpsMessage("Location permission was denied. Allow location access in your browser or phone settings, then retry GPS, or use manual map mode."); setTrackingStatus("error"); setRecording(false); }
+      else if (geoError.code === 3) { setGpsMessage("GPS is taking too long. Move outdoors and retry, or continue with manual map points."); setTrackingStatus("connecting"); }
+      else { setGpsMessage("GPS signal is unavailable. Check your device location setting and retry, or use manual map mode."); setTrackingStatus("error"); }
     }, { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
     return () => { if (watchId.current != null) navigator.geolocation?.clearWatch(watchId.current); watchId.current = null; };
   }, [acceptPosition, gpsRetryKey, paused, recording]);
@@ -161,10 +187,12 @@ export default function FarmMappingPage({ token, onLogout }) {
   function handleMapClick(point) {
     if (movingPoint != null) {
       const selectedPoint = movingPoint + 1;
+      setHasGpsTrack(false);
       setBoundary(points => points.map((item, index) => index === movingPoint ? point : item));
       setGpsMessage(`Boundary point ${selectedPoint} moved.`); setMovingPoint(null); return;
     }
     if (manualMode) {
+      setHasGpsTrack(false);
       setBoundary(points => [...points, point]);
       setGpsMessage(`Manual boundary point ${boundary.length + 1} added.`);
     }
@@ -172,6 +200,7 @@ export default function FarmMappingPage({ token, onLogout }) {
 
   function toggleManualMode() {
     const nextMode = !manualMode;
+    if (!recording) setHasGpsTrack(false);
     setManualMode(nextMode); setMovingPoint(null);
     setGpsMessage(nextMode ? "Manual editing is on. Tap the map to add corners; select a boundary dot to move or remove it." : "Manual editing is off. Turn it on before tapping the map to add corners.");
   }
@@ -182,9 +211,19 @@ export default function FarmMappingPage({ token, onLogout }) {
   }
 
   function startMapping() {
-    if (selectedId && boundary.length && !window.confirm("Start a fresh GPS trace? The saved farm boundary will remain unchanged until you save the new measurement.")) return;
-    if (selectedId && boundary.length) { setBoundary([]); setMeasurement(null); setAccuracySamples([]); }
-    setError(""); setMessage(""); setAccuracy(null); setGpsRetryAvailable(false); setRecording(true); setPaused(false); setGpsMessage("Waiting for a high-accuracy GPS fix. GPS recording is active only while mapping is active.");
+    if (boundary.length && !window.confirm("Start a fresh GPS trace? The saved farm boundary will remain unchanged until you save the new measurement.")) return;
+    if (boundary.length) { setBoundary([]); setMeasurement(null); setAccuracySamples([]); }
+    lastAcceptedPosition.current = null;
+    setGpsWalkDistance(0); setHasGpsTrack(false); setManualMode(false);
+    setError(""); setMessage(""); setAccuracy(null); setGpsRetryAvailable(false); setRecording(true); setPaused(false); setTrackingStatus("connecting"); setGpsMessage("Waiting for a high-accuracy GPS fix. Keep this page open while walking around the boundary.");
+  }
+
+  function togglePause() {
+    const next = !paused;
+    setPaused(next);
+    setTrackingStatus(next ? "paused" : "connecting");
+    setGpsMessage(next ? "Mapping paused. Resume before continuing to record GPS points." : "Reconnecting to GPS. Wait for a reliable fix before continuing to walk.");
+    if (next) lastAcceptedPosition.current = null;
   }
 
   function retryGps() {
@@ -192,29 +231,35 @@ export default function FarmMappingPage({ token, onLogout }) {
       setGpsMessage("This browser does not provide location services. Use manual map mode to add the boundary.");
       return;
     }
-    setGpsRetryAvailable(false); setAccuracy(null); setPaused(false); setGpsMessage("Requesting a fresh high-accuracy GPS fix…");
+    lastAcceptedPosition.current = null;
+    setHasGpsTrack(true);
+    setGpsRetryAvailable(false); setAccuracy(null); setPaused(false); setTrackingStatus("connecting"); setGpsMessage("Requesting a fresh high-accuracy GPS fix…");
     if (recording) setGpsRetryKey(key => key + 1);
     else setRecording(true);
   }
   function finishMapping() {
     setRecording(false); setPaused(false);
     setError(""); setMessage("");
-    try { setMeasurement(measureBoundary(boundary)); setGpsMessage(`Boundary completed with ${boundary.length} points.`); }
-    catch (err) { setMeasurement(null); setError(err.message); setGpsMessage("A valid measurement needs at least three distinct boundary points. Add points manually or retry GPS."); }
+    try { setMeasurement(measureBoundary(boundary)); setTrackingStatus("completed"); setGpsMessage(`Boundary completed with ${boundary.length} points. Review the estimate before saving.`); }
+    catch (err) { setMeasurement(null); setTrackingStatus("ready"); setError(err.message); setGpsMessage("A valid measurement needs at least three distinct boundary points. Add points manually or retry GPS."); }
   }
   function clearBoundary() {
     if (!window.confirm("Clear all unsaved boundary points?")) return;
-    setRecording(false); setPaused(false); setBoundary([]); setMeasurement(null); setAccuracySamples([]); setMovingPoint(null); setError(""); setGpsMessage("Boundary cleared. Your saved farm records are unchanged.");
+    setRecording(false); setPaused(false); setBoundary([]); setMeasurement(null); setAccuracySamples([]); lastAcceptedPosition.current = null; setGpsWalkDistance(0); setHasGpsTrack(false); setMovingPoint(null); setError(""); setTrackingStatus("ready"); setGpsMessage("Boundary cleared. Your saved farm records are unchanged.");
   }
   function selectLand(land) {
+    lastAcceptedPosition.current = null;
     setRecording(false); setPaused(false); setManualMode(false); setMovingPoint(null);
     setMapCenter(hasSavedLocation(land) ? landCenter(land) : defaultMapCenter); setMapZoom(hasSavedLocation(land) ? 18 : 6); setFocusKey(key => key + 1);
     setCurrentPosition(null); setAccuracy(land.gps_accuracy_m == null ? null : Number(land.gps_accuracy_m)); setAccuracySamples([]);
-    setSelectedId(String(land.id)); setBoundary(toPoints(land)); setLocationConfirmation(""); setMeasurement(land.area_square_meters ? { areaSquareMeters:Number(land.area_square_meters), areaHectares:Number(land.size_hectares), areaAcres:Number(land.area_acres), perimeterMeters:Number(land.perimeter_meters) } : null);
+    setSelectedId(String(land.id)); setBoundary(toPoints(land)); setLocationConfirmation(""); setMeasurement(land.area_square_meters ? { areaSquareMeters:Number(land.area_square_meters), areaHectares:Number(land.size_hectares), areaAcres:Number(land.area_acres), perimeterMeters:Number(land.perimeter_meters), walkingDistanceMeters:land.walking_distance_meters == null ? null : Number(land.walking_distance_meters) } : null); setGpsWalkDistance(land.walking_distance_meters == null ? 0 : Number(land.walking_distance_meters)); setHasGpsTrack(land.gps_accuracy_m != null && land.walking_distance_meters != null); setTrackingStatus(hasSavedLocation(land) ? "ready" : "idle");
     setForm({ name:land.name || "", barangay:land.barangay || "", municipality:land.municipality || "", province:land.province || "", region:land.region || "", cropTypes:(land.crop_types || []).join(", "), address:land.address || "", notes:land.notes || "" });
     setError(""); setMessage(""); setGpsMessage(hasSavedLocation(land) ? `Editing ${land.name || "farm record"}. Start mapping to collect GPS points or use manual map mode to adjust the boundary.` : `Editing ${land.name || "farm record"}. This record has no saved GPS location yet; use your current location or place points manually.`);
   }
-  function newFarm() { initialFarmFocus.current = true; setRecording(false); setPaused(false); setManualMode(false); setMovingPoint(null); setSelectedId(""); setMapCenter(defaultMapCenter); setMapZoom(6); setFocusKey(key => key + 1); setCurrentPosition(null); setBoundary([]); setMeasurement(null); setAccuracySamples([]); setLocationConfirmation(""); setForm({ name:"", barangay:"", municipality:"", province:"", region:"", cropTypes:"", address:"", notes:"" }); setError(""); setMessage(""); }
+  function newFarm(skipDiscardConfirmation = false) {
+    if (!skipDiscardConfirmation && (recording || boundary.length) && !window.confirm("Start a new farm and clear the current map points? Any saved farm boundary stays unchanged until you save an edit.")) return;
+    initialFarmFocus.current = true; lastAcceptedPosition.current = null; setRecording(false); setPaused(false); setManualMode(false); setMovingPoint(null); setSelectedId(""); setMapCenter(defaultMapCenter); setMapZoom(6); setFocusKey(key => key + 1); setCurrentPosition(null); setBoundary([]); setMeasurement(null); setAccuracySamples([]); setGpsWalkDistance(0); setHasGpsTrack(false); setLocationConfirmation(""); setTrackingStatus("idle"); setForm({ name:"", barangay:"", municipality:"", province:"", region:"", cropTypes:"", address:"", notes:"" }); setError(""); setMessage("");
+  }
 
   function locateMyFarm() {
     const selectedLand = lands.find(land => String(land.id) === selectedId);
@@ -237,6 +282,7 @@ export default function FarmMappingPage({ token, onLogout }) {
       const point = { latitude: position.coords.latitude, longitude: position.coords.longitude };
       setCurrentPosition(point); setAccuracy(Number(position.coords.accuracy));
       setMapCenter([point.latitude, point.longitude]); setMapZoom(18); setFocusKey(key => key + 1);
+      setTrackingStatus("ready");
       setGpsMessage(`Map centered on your current position (device GPS reports ±${Number(position.coords.accuracy).toFixed(1)} m). This location is only used to move the map.`);
       setLocating(false);
     }, geoError => {
@@ -248,7 +294,12 @@ export default function FarmMappingPage({ token, onLogout }) {
   function removeSelectedPoint() {
     if (movingPoint == null) return;
     setBoundary(points => points.filter((_, index) => index !== movingPoint));
-    setGpsMessage(`Boundary point ${movingPoint + 1} removed.`); setMovingPoint(null); setMeasurement(null);
+    setHasGpsTrack(false); setGpsMessage(`Boundary point ${movingPoint + 1} removed.`); setMovingPoint(null); setMeasurement(null);
+  }
+
+  function undoPoint() {
+    setBoundary(points => points.slice(0, -1));
+    setHasGpsTrack(false); setMeasurement(null); setMovingPoint(null);
   }
 
   function changeMapLayer(layer) {
@@ -266,13 +317,13 @@ export default function FarmMappingPage({ token, onLogout }) {
     if (!locationConfirmed) { setError("Review the map boundary and farm location details, then confirm that they refer to the same farm before saving."); return; }
     setSaving(true);
     const averageAccuracy = accuracySamples.length ? accuracySamples.reduce((sum, value) => sum + value, 0) / accuracySamples.length : null;
-    const body = { ...form, cropTypes:form.cropTypes.split(",").map(item=>item.trim()).filter(Boolean), boundary:boundary.map(point=>({latitude:point.latitude,longitude:point.longitude})), gpsAccuracyM:averageAccuracy };
+    const body = { ...form, cropTypes:form.cropTypes.split(",").map(item=>item.trim()).filter(Boolean), boundary:boundary.map(point=>({latitude:point.latitude,longitude:point.longitude})), gpsAccuracyM:averageAccuracy, walkingDistanceMeters:hasGpsTrack ? gpsWalkDistance : measured.walkingDistanceMeters };
     try {
       const result = selectedId
         ? await api(`/farmers/lands/${selectedId}`, {token, method:"PATCH", body:JSON.stringify(body)})
         : await api("/farmers/lands", {token, method:"POST", body:JSON.stringify(body)});
       setMessage(`${result.land.name || "Farm"} saved. The mapped area is an estimate, not a survey measurement.`);
-      setSelectedId(String(result.land.id)); setBoundary(toPoints(result.land)); setMeasurement(measured); await reload();
+      setSelectedId(String(result.land.id)); setBoundary(toPoints(result.land)); setMeasurement(measured); setGpsWalkDistance(Number(result.land.walking_distance_meters ?? measured.walkingDistanceMeters)); setHasGpsTrack(result.land.gps_accuracy_m != null); await reload();
     } catch (err) { setError(err.message); }
     finally { setSaving(false); }
   }
@@ -280,21 +331,23 @@ export default function FarmMappingPage({ token, onLogout }) {
   async function removeFarm(land) {
     if (!window.confirm(`Delete ${land.name || "this farm"}? Existing damage reports may prevent deletion.`)) return;
     setError(""); setMessage("");
-    try { await api(`/farmers/lands/${land.id}`, {token, method:"DELETE"}); if (String(land.id) === selectedId) newFarm(); setMessage("Farm record deleted."); await reload(); }
+    try { await api(`/farmers/lands/${land.id}`, {token, method:"DELETE"}); if (String(land.id) === selectedId) newFarm(true); setMessage("Farm record deleted."); await reload(); }
     catch (err) { setError(err.message); }
   }
 
   const accuracyWarning = accuracy == null ? null : accuracy > 20 ? "GPS uncertainty is high and may materially affect this area estimate." : accuracy > 10 ? "GPS uncertainty may affect the estimate. Review the boundary on the map." : "The reported GPS uncertainty is low, but phone GPS is still not survey-grade.";
   const quality = accuracySamples.length ? accuracySamples.reduce((sum, value) => sum + value, 0) / accuracySamples.length : accuracy;
+  const trackingLabel = recording ? paused ? "Paused" : trackingStatus === "recording" ? "Recording" : trackingStatus === "error" ? "GPS unavailable" : "GPS connecting" : trackingStatus === "completed" ? "Completed" : trackingStatus === "ready" ? "GPS ready" : "Not recording";
+  const trackingTone = trackingStatus === "completed" ? "bg-sky-100 text-sky-800" : recording && !paused ? "bg-emerald-100 text-emerald-800" : paused ? "bg-amber-100 text-amber-900" : trackingStatus === "error" ? "bg-red-100 text-red-800" : "bg-slate-100 text-slate-600";
 
-  return <AppShell onLogout={onLogout}><PageHeader eyebrow="Farmer portal" title="GPS farm mapping" description="Walk the farm perimeter or place boundary points on the map. Area and perimeter are estimates from the points you record." action={<button type="button" onClick={newFarm} className={button}>New farm</button>}/>
+  return <AppShell onLogout={onLogout}><PageHeader eyebrow="Farmer portal" title="GPS farm mapping" description="Walk the farm perimeter or place boundary points on the map. Area, walking distance, and perimeter are estimates from the points you record." action={<button type="button" onClick={() => newFarm()} className={button}>New farm</button>}/>
     {error && <p role="alert" className="mt-5 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}{message && <p role="status" className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{message}</p>}
     <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(20rem,.8fr)]">
       <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-        <div className="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-bold text-slate-900">Map the farm boundary</h2><p className="mt-1 text-xs leading-5 text-slate-500">Walk only along the field edge. In manual mode, tap each corner around the perimeter.</p></div><div className={`rounded-full px-3 py-1.5 text-xs font-bold ${recording && !paused ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"}`}>{recording ? paused ? "Paused" : "GPS recording" : "Not recording"}</div></div>
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-600">Zoom with the mouse wheel, map buttons, or pinch on a touchscreen.</p><div className="flex gap-2" role="group" aria-label="Map layer"><button type="button" className={`${button} ${mapLayer === "street" ? "border-emerald-700 bg-emerald-50" : ""}`} aria-pressed={mapLayer === "street"} onClick={() => changeMapLayer("street")}>Street</button><button type="button" className={`${button} ${mapLayer === "satellite" ? "border-emerald-700 bg-emerald-50" : ""}`} aria-pressed={mapLayer === "satellite"} onClick={() => changeMapLayer("satellite")}>Satellite</button></div></div>
-        <div className="mb-2 flex flex-wrap gap-2"><button type="button" className={button} onClick={locateMyFarm}>Locate My Farm</button><button type="button" className={button} onClick={locateCurrentPosition} disabled={locating}>{locating ? "Locating…" : "Use My Current Location"}</button></div>
-        <div className="relative h-[min(55vh,32rem)] min-h-72 overflow-hidden rounded-lg border border-slate-200">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-bold text-slate-900">Map the farm boundary</h2><p className="mt-1 text-xs leading-5 text-slate-500">Walk only along the field edge. In manual mode, tap each corner around the perimeter.</p></div><div role="status" aria-live="polite" className={`rounded-full px-3 py-1.5 text-xs font-bold ${trackingTone}`}>{trackingLabel}</div></div>
+        <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><p className="text-xs font-semibold text-slate-600">Zoom with the map buttons or pinch on a touchscreen.</p><div className="flex gap-2" role="group" aria-label="Map layer"><button type="button" className={`${button} flex-1 sm:flex-none ${mapLayer === "street" ? "border-emerald-700 bg-emerald-50" : ""}`} aria-pressed={mapLayer === "street"} onClick={() => changeMapLayer("street")}>Street</button><button type="button" className={`${button} flex-1 sm:flex-none ${mapLayer === "satellite" ? "border-emerald-700 bg-emerald-50" : ""}`} aria-pressed={mapLayer === "satellite"} onClick={() => changeMapLayer("satellite")}>Satellite</button></div></div>
+        <div className="mb-2 grid gap-2 sm:flex sm:flex-wrap"><button type="button" className={`${button} w-full sm:w-auto`} onClick={locateMyFarm}>Locate My Farm</button><button type="button" className={`${button} w-full sm:w-auto`} onClick={locateCurrentPosition} disabled={locating}>{locating ? "Locating…" : "Use My Current Location"}</button></div>
+        <div className="farm-mapping-map relative h-[min(55vh,32rem)] min-h-72 overflow-hidden rounded-lg border border-slate-200">
           <MapContainer center={mapCenter} zoom={mapZoom} minZoom={3} maxZoom={satelliteMaxZoom} zoomControl scrollWheelZoom touchZoom doubleClickZoom zoomSnap={0.5} zoomDelta={0.5} className="h-full w-full">
             <RecenterMap center={mapCenter} zoom={mapZoom} focusKey={focusKey}/><MapZoomLimit maxZoom={mapMaxZoom}/><ResizeMap/><MapActions onMapClick={handleMapClick}/>
             {/* Do not set errorTileUrl: keep failed requests visible through tileerror instead of masking them with a fake tile. */}
@@ -311,19 +364,19 @@ export default function FarmMappingPage({ token, onLogout }) {
         {mapLayer === "satellite" && satelliteLoading && !satelliteTileError && <p role="status" className="mt-2 text-xs text-slate-600">Loading satellite imagery…</p>}
         {mapLayer === "satellite" && satelliteTileError && <p role="alert" className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900"><span>{satelliteTileError}</span><button type="button" className={button} onClick={() => changeMapLayer("street")}>Switch to Street</button></p>}
         <p className="mt-2 text-[11px] leading-5 text-slate-500">{mapLayer === "street" ? "Street maps are capped at level 19." : "Satellite map zooms to level 21; native imagery is capped at level 18, and closer views enlarge those tiles where finer source imagery is unavailable."} Imagery resolution and capture date vary by location.</p>
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap"><button type="button" className="min-h-11 rounded-lg bg-emerald-800 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-900 disabled:opacity-50" onClick={recording ? finishMapping : startMapping} disabled={saving}>{recording ? "Finish mapping" : "Start mapping"}</button>{recording && <button type="button" className={button} onClick={()=>setPaused(value=>!value)}>{paused ? "Resume" : "Pause"}</button>}<button type="button" className={button} onClick={()=>{setBoundary(points=>points.slice(0,-1));setMeasurement(null);setMovingPoint(null);}} disabled={!boundary.length}>Undo point</button><button type="button" className={`${button} ${manualMode ? "border-emerald-800 bg-emerald-800 text-white hover:bg-emerald-900" : ""}`} aria-pressed={manualMode} onClick={toggleManualMode}>{manualMode ? "Manual editing on" : "Add / edit points"}</button><button type="button" className={button} onClick={()=>setMovingPoint(null)} disabled={movingPoint==null}>Done moving point</button><button type="button" className={button} onClick={removeSelectedPoint} disabled={movingPoint==null}>Remove selected point</button><button type="button" className={button} onClick={clearBoundary} disabled={!boundary.length}>Clear boundary</button></div>
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap"><button type="button" className="min-h-11 rounded-lg bg-emerald-800 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-900 disabled:opacity-50" onClick={recording ? finishMapping : startMapping} disabled={saving}>{recording ? "Finish Mapping" : "Start Mapping"}</button>{recording && <button type="button" className={button} onClick={togglePause}>{paused ? "Resume Mapping" : "Pause Mapping"}</button>}<button type="button" className={button} onClick={undoPoint} disabled={!boundary.length}>Undo point</button><button type="button" className={`${button} ${manualMode ? "border-emerald-800 bg-emerald-800 text-white hover:bg-emerald-900" : ""}`} aria-pressed={manualMode} onClick={toggleManualMode}>{manualMode ? "Manual editing on" : "Add / edit points"}</button><button type="button" className={button} onClick={()=>setMovingPoint(null)} disabled={movingPoint==null}>Done moving point</button><button type="button" className={button} onClick={removeSelectedPoint} disabled={movingPoint==null}>Remove selected point</button><button type="button" className={button} onClick={clearBoundary} disabled={!boundary.length}>Clear boundary</button></div>
         <p role="status" aria-live="polite" className={`mt-3 rounded-lg p-3 text-xs leading-5 ${manualMode ? "bg-emerald-50 text-emerald-900" : "bg-slate-50 text-slate-600"}`}>{manualMode ? "Manual editing is ON: tap the map to add a corner. Select a boundary dot, then tap elsewhere to move it, or remove it." : "Manual editing is OFF. Turn on Add / edit points before tapping the map to add corners."}</p>
         <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-600"><span>GPS accuracy: <b>{accuracy == null ? "Not available" : `±${accuracy.toFixed(1)} m (device reported)`}</b></span><span>Boundary points: <b>{boundary.length}</b></span><span>Map points: <b>{manualMode ? "Tap map to add; select a dot to edit it" : "Manual mode off"}</b></span></div>
         <div className={`mt-2 flex flex-wrap items-center justify-between gap-2 text-xs leading-5 ${accuracy != null && accuracy > 20 || gpsRetryAvailable ? "text-amber-800" : "text-slate-500"}`}><p>{gpsMessage}</p>{gpsRetryAvailable && <button type="button" className={button} onClick={retryGps}>Try GPS Again</button>}</div>
       </section>
 
       <div className="space-y-5">
-        <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><h2 className="font-bold text-slate-900">Measurement estimate</h2>{calculated ? <div className="mt-3 grid grid-cols-2 gap-3"><Metric label="Area" value={`${calculated.areaSquareMeters.toLocaleString(undefined,{maximumFractionDigits:0})} m²`}/><Metric label="Hectares" value={`${calculated.areaHectares.toFixed(4)} ha`}/><Metric label="Acres" value={`${calculated.areaAcres.toFixed(3)} ac`}/><Metric label="Perimeter" value={`${calculated.perimeterMeters.toFixed(1)} m`}/></div> : <p className="mt-2 text-sm text-slate-500">Record at least three distinct points to see area and perimeter.</p>}{accuracyWarning && <p className={`mt-3 rounded-lg p-3 text-xs leading-5 ${accuracy > 20 ? "bg-amber-50 text-amber-900" : "bg-emerald-50 text-emerald-900"}`}>{accuracyWarning}</p>}<p className="mt-3 text-[11px] leading-5 text-slate-500">Ordinary phone GPS is not survey-grade. Map tiles © OpenStreetMap contributors. Actual planted area can be smaller than the total farm boundary.</p></section>
+        <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><h2 className="font-bold text-slate-900">Measurement estimate</h2><div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">{boundary.length >= 2 && <Metric label={hasGpsTrack ? "Distance walked" : "Boundary path"} value={`${(hasGpsTrack ? gpsWalkDistance : walkingDistanceMeters).toFixed(1)} m`}/>}</div>{calculated && <div className="grid grid-cols-2 gap-3 sm:grid-cols-3"><Metric label="Area" value={`${calculated.areaSquareMeters.toLocaleString(undefined,{maximumFractionDigits:0})} m²`}/><Metric label="Hectares" value={`${calculated.areaHectares.toFixed(4)} ha`}/><Metric label="Farm perimeter" value={`${calculated.perimeterMeters.toFixed(1)} m`}/><Metric label="Acres" value={`${calculated.areaAcres.toFixed(3)} ac`}/></div>}{!calculated && <p className="mt-2 text-sm text-slate-500">Record at least three reliable boundary points to calculate area and farm perimeter.</p>}{calculated && <p className="mt-2 text-[11px] text-slate-500">GPS distance includes active tracking segments and excludes pauses and the final closing line.</p>}{accuracyWarning && <p className={`mt-3 rounded-lg p-3 text-xs leading-5 ${accuracy > 20 ? "bg-amber-50 text-amber-900" : "bg-emerald-50 text-emerald-900"}`}>{accuracyWarning}</p>}<p className="mt-3 text-[11px] leading-5 text-slate-500">These measurements are GPS estimates, not official land surveys. Ordinary phone GPS is not survey-grade. Map tiles © OpenStreetMap contributors. Actual planted area can be smaller than the total farm boundary.</p></section>
         <form onSubmit={saveFarm} className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
           <div><h2 className="font-bold text-slate-900">{selectedId ? "Save farm boundary" : "Save mapped farm"}</h2><p className="mt-1 text-xs text-slate-500">Mapped area and boundary-derived coordinates are stored on the existing land record.</p></div>
           <Field label="Farm name"><input className={input} maxLength="150" required value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="e.g. North rice field"/></Field>
           <Field label="Barangay"><input className={input} maxLength="120" required value={form.barangay} onChange={e=>setForm({...form,barangay:e.target.value})}/></Field>
-          <div className="grid grid-cols-2 gap-3"><Field label="Municipality"><input className={input} required value={form.municipality} onChange={e=>setForm({...form,municipality:e.target.value})}/></Field><Field label="Province"><input className={input} required value={form.province} onChange={e=>setForm({...form,province:e.target.value})}/></Field></div>
+          <div className="grid gap-3 sm:grid-cols-2"><Field label="Municipality"><input className={input} required value={form.municipality} onChange={e=>setForm({...form,municipality:e.target.value})}/></Field><Field label="Province"><input className={input} required value={form.province} onChange={e=>setForm({...form,province:e.target.value})}/></Field></div>
           <Field label="Region (optional)"><input className={input} value={form.region} onChange={e=>setForm({...form,region:e.target.value})}/></Field>
           <Field label="Primary crops (comma separated)"><input className={input} value={form.cropTypes} onChange={e=>setForm({...form,cropTypes:e.target.value})} placeholder="Rice, corn, vegetables"/></Field>
           <Field label="Address or sitio (optional)"><input className={input} value={form.address} onChange={e=>setForm({...form,address:e.target.value})}/></Field>
@@ -334,7 +387,7 @@ export default function FarmMappingPage({ token, onLogout }) {
       </div>
     </div>
 
-    <section className="mt-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><div className="flex items-center justify-between gap-3"><div><h2 className="font-bold text-slate-900">Saved farms</h2><p className="mt-1 text-xs text-slate-500">Select a farm to review or remap it. Crop detection and damage reports already use these land records.</p></div>{loading && <span className="text-xs text-slate-500">Loading…</span>}</div><div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{lands.map(land=><article key={land.id} className={`rounded-lg border p-4 ${String(land.id)===selectedId ? "border-emerald-400 bg-emerald-50/50" : "border-slate-200"}`}><div className="flex items-start justify-between gap-3"><div><h3 className="font-bold text-slate-900">{land.name || "Farm land"}</h3><p className="mt-1 text-xs text-slate-500">{[land.barangay,land.municipality,land.province].filter(Boolean).join(", ") || "Location not provided"}</p></div><button type="button" onClick={()=>removeFarm(land)} className="text-xs font-bold text-red-700 hover:underline">Delete</button></div>{land.boundary_geojson ? <><p className="mt-3 text-sm text-emerald-900">{Number(land.area_square_meters).toLocaleString(undefined,{maximumFractionDigits:0})} m² · {Number(land.size_hectares).toFixed(4)} ha · {Number(land.area_acres).toFixed(3)} acres</p><p className="mt-1 text-xs text-slate-500">Perimeter {Number(land.perimeter_meters).toFixed(1)} m · {land.boundary_geojson.coordinates?.[0]?.length ? land.boundary_geojson.coordinates[0].length-1 : 0} points · GPS {land.measurement_quality || "manual"}</p></> : <p className="mt-3 text-xs text-amber-800">Saved land pin only; map its perimeter to calculate an area.</p>}<button type="button" className={`${button} mt-3 w-full`} onClick={()=>selectLand(land)}>{String(land.id)===selectedId ? "Selected for editing" : "Review / remap"}</button><MeasurementHistory token={token} landId={land.id}/></article>)}{!loading && !lands.length && <p className="text-sm text-slate-500">No saved farm records yet.</p>}</div></section>
+    <section className="mt-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><div className="flex items-center justify-between gap-3"><div><h2 className="font-bold text-slate-900">Saved farms</h2><p className="mt-1 text-xs text-slate-500">Select a farm to review or remap it. Crop detection and damage reports already use these land records.</p></div>{loading && <span className="text-xs text-slate-500">Loading…</span>}</div><div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{lands.map(land=><article key={land.id} className={`rounded-lg border p-4 ${String(land.id)===selectedId ? "border-emerald-400 bg-emerald-50/50" : "border-slate-200"}`}><div className="flex items-start justify-between gap-3"><div><h3 className="font-bold text-slate-900">{land.name || "Farm land"}</h3><p className="mt-1 text-xs text-slate-500">{[land.barangay,land.municipality,land.province].filter(Boolean).join(", ") || "Location not provided"}</p></div><button type="button" onClick={()=>removeFarm(land)} className="text-xs font-bold text-red-700 hover:underline">Delete</button></div>{land.boundary_geojson ? <><p className="mt-3 text-sm text-emerald-900">{Number(land.area_square_meters).toLocaleString(undefined,{maximumFractionDigits:0})} m² · {Number(land.size_hectares).toFixed(4)} ha · {Number(land.area_acres).toFixed(3)} acres</p><p className="mt-1 text-xs text-slate-500">Perimeter {Number(land.perimeter_meters).toFixed(1)} m · {land.boundary_geojson.coordinates?.[0]?.length ? land.boundary_geojson.coordinates[0].length-1 : 0} points · GPS {land.measurement_quality || "manual"}</p></> : <p className="mt-3 text-xs text-amber-800">Saved land pin only; map its perimeter to calculate an area.</p>}<button type="button" className={`${button} !w-full mt-3`} onClick={()=>selectLand(land)}>{String(land.id)===selectedId ? "Selected for editing" : "Review / remap"}</button><MeasurementHistory token={token} landId={land.id}/></article>)}{!loading && !lands.length && <p className="text-sm text-slate-500">No saved farm records yet.</p>}</div></section>
   </AppShell>;
 }
 
@@ -343,5 +396,5 @@ function Metric({ label, value }) { return <div className="rounded-lg bg-slate-5
 function MeasurementHistory({ token, landId }) {
   const [rows, setRows] = useState(null), [loading, setLoading] = useState(false), [error, setError] = useState("");
   async function load() { setLoading(true); setError(""); try { const result = await api(`/farmers/lands/${landId}/measurements`, {token}); setRows(result.measurements); } catch (err) { setError(err.message); } finally { setLoading(false); } }
-  return <div className="mt-2"><button type="button" onClick={load} disabled={loading} className="w-full py-1 text-xs font-bold text-sky-800 hover:underline disabled:opacity-50">{loading ? "Loading history…" : rows ? "Refresh measurement history" : "View measurement history"}</button>{error && <p className="mt-1 text-xs text-red-700">{error}</p>}{rows && <div className="mt-2 max-h-32 space-y-1 overflow-y-auto rounded-lg bg-slate-50 p-2">{rows.map(item=><p key={item.id} className="text-[10px] leading-4 text-slate-600"><b>{new Date(item.measured_at).toLocaleString()}</b> · {Number(item.area_square_meters).toLocaleString(undefined,{maximumFractionDigits:0})} m² · {Number(item.area_hectares).toFixed(4)} ha · {item.measurement_quality}</p>)}{!rows.length && <p className="text-[10px] text-slate-500">No perimeter measurement has been saved yet.</p>}</div>}</div>;
+  return <div className="mt-2"><button type="button" onClick={load} disabled={loading} className="w-full py-1 text-xs font-bold text-sky-800 hover:underline disabled:opacity-50">{loading ? "Loading history…" : rows ? "Refresh measurement history" : "View measurement history"}</button>{error && <p className="mt-1 text-xs text-red-700">{error}</p>}{rows && <div className="mt-2 max-h-32 space-y-1 overflow-y-auto rounded-lg bg-slate-50 p-2">{rows.map(item=><p key={item.id} className="text-[10px] leading-4 text-slate-600"><b>{new Date(item.measured_at).toLocaleString()}</b> · {Number(item.area_square_meters).toLocaleString(undefined,{maximumFractionDigits:0})} m² · {Number(item.area_hectares).toFixed(4)} ha · walked {item.walking_distance_meters == null ? "not recorded" : `${Number(item.walking_distance_meters).toFixed(1)} m`} · {item.measurement_quality}</p>)}{!rows.length && <p className="text-[10px] text-slate-500">No perimeter measurement has been saved yet.</p>}</div>}</div>;
 }

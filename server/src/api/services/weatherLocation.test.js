@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { normalizeCoordinates, readablePlaceName, resolveFarmerWeatherLand, weatherCacheKey } from "./weatherLocation.js";
+import { searchWeatherLocations } from "../controllers/weatherController.js";
 
 const mappedFarm = (overrides = {}) => ({ id: 12, name: "North Field", latitude: "12.7512", longitude: "121.4893", mapped_at: "2026-10-20T08:00:00.000Z", ...overrides });
 
@@ -43,4 +44,34 @@ test("builds a coarse readable place label from reverse-geocoded locality fields
   assert.equal(readablePlaceName({ village: "Bongabong", state: "Oriental Mindoro", country: "Philippines" }), "Bongabong, Oriental Mindoro, Philippines");
   assert.equal(readablePlaceName({ city: "Springfield", town: "Ignored town", country: "United States" }), "Springfield, United States");
   assert.equal(readablePlaceName({}), null);
+});
+
+test("searches a place through the server geocoder and returns selectable coordinates", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl, requestedHeaders;
+  globalThis.fetch = async (url, options) => {
+    requestedUrl = new URL(url);
+    requestedHeaders = options.headers;
+    return { ok: true, json: async () => [{ lat: "12.75", lon: "121.48", display_name: "Bongabong", address: { municipality: "Bongabong", province: "Oriental Mindoro", country: "Philippines" } }] };
+  };
+  try {
+    let status = 200, payload, nextError;
+    const response = { status(code) { status = code; return this; }, json(value) { payload = value; return value; } };
+    await searchWeatherLocations({ query: { q: "Bongabong manual-search-test" } }, response, error => { nextError = error; });
+    assert.equal(nextError, undefined);
+    assert.equal(status, 200);
+    assert.equal(requestedUrl.pathname, "/search");
+    assert.equal(requestedUrl.searchParams.get("q"), "Bongabong manual-search-test");
+    assert.match(requestedHeaders["User-Agent"], /SmartFarmAI/);
+    assert.deepEqual(payload.locations, [{ latitude: 12.75, longitude: 121.48, label: "Bongabong, Oriental Mindoro, Philippines" }]);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("rejects blank manual place searches before contacting the geocoder", async () => {
+  let status = 200, payload, nextError;
+  const response = { status(code) { status = code; return this; }, json(value) { payload = value; return value; } };
+  await searchWeatherLocations({ query: { q: " " } }, response, error => { nextError = error; });
+  assert.equal(nextError, undefined);
+  assert.equal(status, 400);
+  assert.match(payload.message, /place name/i);
 });

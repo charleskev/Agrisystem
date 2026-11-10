@@ -1,5 +1,5 @@
 export function locationFailureMessage(error) {
-  if (error?.code === 1) return "Location permission was denied. Allow location access in your browser settings, then try again to see local weather.";
+  if (error?.code === 1) return "Location permission was denied. In your phone's browser site settings, allow Location for AgriSystem and turn on device Location Services, then tap Retry Location. You can also search for a place manually.";
   if (error?.code === 2) return "Your device could not determine its location. Check that device location services are on, then try again.";
   if (error?.code === 3) return "Getting your location took too long. Move somewhere with a clearer GPS signal and try again.";
   if (error?.code === "UNSUPPORTED") return "This browser does not provide GPS location. Open the app over HTTPS or on localhost and try again.";

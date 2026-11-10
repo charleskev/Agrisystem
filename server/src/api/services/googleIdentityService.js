@@ -11,12 +11,30 @@ export async function verifyGoogleIdToken(credential) {
     error.status = 503;
     throw error;
   }
-  const ticket = await client.verifyIdToken({ idToken: credential, audience: googleClientId() });
-  const payload = ticket.getPayload();
-  if (!payload?.email || !payload.email_verified) {
-    const error = new Error("Google did not provide a verified email address.");
+  if (typeof credential !== "string" || credential.length > 16_384) {
+    const error = new Error("Google sign-in could not be verified. Please try again.");
     error.status = 401;
     throw error;
   }
-  return { email: payload.email.toLowerCase(), fullName: payload.name || payload.given_name || "Google user" };
+  try {
+    // verifyIdToken checks Google's signature, issuer, expiry, and this client ID audience.
+    const ticket = await client.verifyIdToken({ idToken: credential, audience: googleClientId() });
+    const payload = ticket.getPayload();
+    if (!payload?.sub || !payload.email || !payload.email_verified) {
+      const error = new Error("Google did not provide a verified account identity.");
+      error.status = 401;
+      throw error;
+    }
+    return {
+      subject: payload.sub,
+      email: payload.email.toLowerCase(),
+      hostedDomain: payload.hd || null,
+      fullName: payload.name || payload.given_name || "Google user"
+    };
+  } catch (error) {
+    if (error.status) throw error;
+    const invalidToken = new Error("Google sign-in could not be verified. Please try again.");
+    invalidToken.status = 401;
+    throw invalidToken;
+  }
 }

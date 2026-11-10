@@ -1,6 +1,8 @@
 import { pool } from "../../config/db.js";
 export async function findUserByContact(contactNumber) { const [rows] = await pool.query("SELECT * FROM users WHERE contact_number = ?", [contactNumber]); return rows[0] || null; }
 export async function findUserByEmail(email) { const [rows] = await pool.query("SELECT * FROM users WHERE LOWER(email) = LOWER(?)", [String(email || "").trim()]); return rows[0] || null; }
+export async function findUserByGoogleSubject(subject) { const [rows] = await pool.query("SELECT * FROM users WHERE google_sub = ? LIMIT 1", [subject]); return rows[0] || null; }
+export async function linkGoogleSubject(userId, subject) { const [result] = await pool.query("UPDATE users SET google_sub = ? WHERE id = ? AND google_sub IS NULL", [subject, userId]); return result.affectedRows === 1; }
 export async function findUserById(id) { const [rows] = await pool.query("SELECT id, full_name, contact_number, email, role, is_active, created_at FROM users WHERE id = ?", [id]); return rows[0] || null; }
 export async function createUser({ fullName, contactNumber, email, passwordHash, role = "farmer" }, db = pool) { const [result] = await db.query("INSERT INTO users (full_name, contact_number, email, password_hash, role) VALUES (?, ?, ?, ?, ?)", [fullName, contactNumber, email || null, passwordHash, role]); return { id: result.insertId, full_name: fullName, contact_number: contactNumber, email: email || null, role }; }
 export async function listUsers(role) {

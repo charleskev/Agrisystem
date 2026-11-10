@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 300" role="img" aria-labelledby="title desc">
+  <title id="title">AgriSystem Municipal Agriculture Office</title>
+  <desc id="desc">Agricultural landscape with sunrise, farm fields, a tractor, farmer, and MAO office beside the AgriSystem name.</desc>
+  <defs>
+    <linearGradient id="badgeSky" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f5ffd7"/><stop offset="1" stop-color="#c5ed7a"/></linearGradient>
+    <linearGradient id="hill" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#28a34d"/><stop offset="1" stop-color="#075c34"/></linearGradient>
+    <linearGradient id="lime" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#79bd12"/><stop offset="1" stop-color="#b1e52b"/></linearGradient>
+    <clipPath id="badgeClip"><circle cx="150" cy="150" r="124"/></clipPath>
+  </defs>
+  <rect width="1000" height="300" rx="28" fill="#1b6849"/>
+  <circle cx="150" cy="150" r="137" fill="#1b6849" stroke="#f5fff0" stroke-width="9"/>
+  <g clip-path="url(#badgeClip)">
+    <rect x="25" y="26" width="250" height="248" fill="url(#badgeSky)"/>
+    <circle cx="159" cy="104" r="43" fill="#ffca28"/>
+    <g stroke="#f5a900" stroke-width="7" stroke-linecap="round"><path d="M159 46V31M110 62 99 51M206 62l11-11M101 105H85M218 105h16M118 43l-7-14M200 43l7-14"/></g>
+    <path d="M24 135c42-30 77-33 112-17 27 12 56 9 83-8 22-13 42-13 62-4v66H24z" fill="url(#hill)"/>
+    <path d="M24 163c49-24 87-30 123-20 42 11 79 4 134-25v156H24z" fill="#128244"/>
+    <path d="M25 189c51-31 104-34 151-12 37 17 70 15 105 1M25 214c54-34 106-34 156-10 35 17 67 17 100 5M27 243c50-28 98-28 148-6 37 16 72 18 107 11" fill="none" stroke="#a5d929" stroke-width="12"/>
+    <path d="M38 136c-15-32-10-59 12-82 17 25 19 52 5 82M49 143c9-42 32-66 70-74-4 36-28 61-70 74" fill="#4fae12" stroke="#18753b" stroke-width="5" stroke-linejoin="round"/>
+    <path d="M49 145c9-31 26-54 52-70" fill="none" stroke="#d4f064" stroke-width="4" stroke-linecap="round"/>
+    <g fill="#f8fff0" stroke="#075a39" stroke-width="4" stroke-linejoin="round"><path d="M184 123h59l22 14v49h-81z"/><path d="M174 135h78l-9-20-27-15-29 15z"/><path d="M197 153h38v17h-38z" fill="#d7efbd"/></g>
+    <text x="216" y="166" text-anchor="middle" fill="#075a39" font-family="Arial,sans-serif" font-size="13" font-weight="800">MAO</text>
+    <g fill="#064321" stroke="#064321" stroke-linecap="round" stroke-linejoin="round"><path d="M119 147h42v15h-42zM127 139h15l5 9h-20z"/><circle cx="129" cy="166" r="9" fill="#132d1b" stroke="#c9e8a3" stroke-width="3"/><circle cx="154" cy="166" r="7" fill="#132d1b" stroke="#c9e8a3" stroke-width="3"/><circle cx="139" cy="134" r="5"/><path d="M137 140h8l5 9h-17z"/></g>
+    <g fill="#064321"><path d="M76 173c0-14 9-24 23-24s22 10 22 24v23H76z"/><path d="M72 152c6-14 29-20 49-9l-5 7c-12-5-27-4-39 6z" fill="#f6c43b"/><path d="M92 173h12l8 29H85zM95 198h12l15 13H89zM74 177h-9v37h9zM111 177h10v34h-10z"/></g>
+  </g>
+  <text x="315" y="132" font-family="Arial,Helvetica,sans-serif" font-size="112" font-weight="900" letter-spacing="-7" fill="#f5fff0">Agri<tspan fill="url(#lime)">System</tspan></text>
+  <path d="M320 150c160 20 333 19 517-1" fill="none" stroke="#e6ae16" stroke-width="8" stroke-linecap="round"/>
+  <text x="324" y="202" font-family="Arial,Helvetica,sans-serif" font-size="28" font-weight="800" letter-spacing="8" fill="#f5fff0">MUNICIPAL AGRICULTURE OFFICE</text>
+  <text x="322" y="250" font-family="Arial,Helvetica,sans-serif" font-size="28" font-style="italic" font-weight="700" fill="#d4f09d">“Smart Agriculture. Prosperous Community.”</text>
+</svg>

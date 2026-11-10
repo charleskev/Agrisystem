@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 import { pool } from "../../config/db.js";
 import { createFarmerProfile } from "../models/farmerModel.js";
 import { createLand } from "../models/landModel.js";
-import { createUser, findUserByContact, findUserByEmail, updateUserPassword } from "../models/userModel.js";
+import { createUser, findUserByContact, findUserByEmail, findUserByGoogleSubject, linkGoogleSubject, updateUserPassword } from "../models/userModel.js";
 import { isSmsConfigured, sendPasswordResetCode } from "../services/smsService.js";
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "crypto";
 import { googleClientId, isGoogleSignInConfigured, verifyGoogleIdToken } from "../services/googleIdentityService.js";
@@ -146,10 +146,46 @@ export async function confirmPasswordReset(req, res, next) {
 
 export function googleSignInConfig(_req, res) { res.json({ enabled: isGoogleSignInConfigured(), clientId: googleClientId() || null }); }
 
+function googleLinkError(message, status = 409) { const error = new Error(message); error.status = status; return error; }
+
+async function findOrLinkGoogleUser(identity) {
+  const linkedUser = await findUserByGoogleSubject(identity.subject);
+  if (linkedUser) return linkedUser;
+
+  const user = await findUserByEmail(identity.email);
+  if (!user) return null;
+  if (!user.is_active) return user;
+  if (user.google_sub && user.google_sub !== identity.subject) {
+    throw googleLinkError("This AgriSystem account is already linked to a different Google account. Sign in with your password or contact MAO.");
+  }
+
+  // A verified Gmail or Workspace address is authoritative. Google notes that
+  // email_verified alone may be stale for third-party email addresses, so those
+  // accounts must continue using their AgriSystem password.
+  const isAuthoritativeGoogleEmail = identity.email.endsWith("@gmail.com") || Boolean(identity.hostedDomain);
+  if (!isAuthoritativeGoogleEmail) {
+    throw googleLinkError("Google sign-in can link Gmail or Google Workspace accounts. Use your AgriSystem password for this email address.", 403);
+  }
+
+  if (!user.google_sub) {
+    try {
+      await linkGoogleSubject(user.id, identity.subject);
+    } catch (error) {
+      if (error.code !== "ER_DUP_ENTRY") throw error;
+    }
+  }
+
+  const accountForSubject = await findUserByGoogleSubject(identity.subject);
+  if (!accountForSubject || String(accountForSubject.id) !== String(user.id)) {
+    throw googleLinkError("This Google account is already linked to another AgriSystem account. Sign in with your password or contact MAO.");
+  }
+  return accountForSubject;
+}
+
 export async function googleLogin(req, res, next) {
   try {
     const identity = await verifyGoogleIdToken(req.body.credential);
-    const user = await findUserByEmail(identity.email);
+    const user = await findOrLinkGoogleUser(identity);
     if (!user) return res.status(404).json({ message: "No AgriSystem account is registered with this Google email. Create a farmer account first." });
     if (!user.is_active) return res.status(403).json({ message: "This account has been disabled." });
     if (user.role !== "admin" && await isMaintenanceMode()) return res.status(503).json({ message: "AgriSystem is temporarily in maintenance mode. Please try again later." });
@@ -158,7 +194,10 @@ export async function googleLogin(req, res, next) {
 }
 
 export async function googleProfile(req, res, next) {
-  try { res.json({ profile: await verifyGoogleIdToken(req.body.credential) }); } catch (error) { next(error); }
+  try {
+    const { email, fullName } = await verifyGoogleIdToken(req.body.credential);
+    res.json({ profile: { email, fullName } });
+  } catch (error) { next(error); }
 }
 
 export async function currentUser(req, res) { res.json({ user: req.user }); }
