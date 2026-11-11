@@ -1,0 +1,101 @@
+name: agrisystem
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: agrisystem-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DOCKER_MYSQL_DATABASE:?Set DOCKER_MYSQL_DATABASE in .env.docker}
+      MYSQL_USER: ${DOCKER_MYSQL_USER:?Set DOCKER_MYSQL_USER in .env.docker}
+      MYSQL_PASSWORD: ${DOCKER_MYSQL_PASSWORD:?Set DOCKER_MYSQL_PASSWORD in .env.docker}
+      MYSQL_ROOT_PASSWORD: ${DOCKER_MYSQL_ROOT_PASSWORD:?Set DOCKER_MYSQL_ROOT_PASSWORD in .env.docker}
+    volumes:
+      - agrisystem_mysql_data:/var/lib/mysql
+    networks:
+      - agrisystem_network
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping --host=127.0.0.1 --user=root --password=$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  backend:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    container_name: agrisystem-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      CLIENT_ORIGIN: "http://localhost:5173,http://localhost:${DOCKER_FRONTEND_PORT:-3001},http://127.0.0.1:${DOCKER_FRONTEND_PORT:-3001}"
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${DOCKER_BACKEND_DATABASE:?Set DOCKER_BACKEND_DATABASE in .env.docker}
+      MYSQL_USER: ${DOCKER_MYSQL_USER:?Set DOCKER_MYSQL_USER in .env.docker}
+      MYSQL_PASSWORD: ${DOCKER_MYSQL_PASSWORD:?Set DOCKER_MYSQL_PASSWORD in .env.docker}
+      JWT_SECRET: ${DOCKER_JWT_SECRET:?Set DOCKER_JWT_SECRET in .env.docker}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_VISION_MODEL: ${GEMINI_VISION_MODEL:-gemini-3.6-flash}
+
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${DOCKER_BACKEND_PORT:-5001}:4000"
+    volumes:
+      - agrisystem_uploads:/app/uploads
+    networks:
+      - agrisystem_network
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r => { if (!r.ok) process.exit(1); }).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 45s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+      args:
+        VITE_API_URL: /api
+    container_name: agrisystem-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${DOCKER_FRONTEND_PORT:-3001}:80"
+    networks:
+      - agrisystem_network
+
+  phpmyadmin:
+    image: phpmyadmin:5.2-apache
+    container_name: agrisystem-phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_ARBITRARY: 0
+      UPLOAD_LIMIT: 32M
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${DOCKER_PHPMYADMIN_PORT:-8082}:80"
+    networks:
+      - agrisystem_network
+
+networks:
+  agrisystem_network:
+    name: agrisystem-network
+    driver: bridge
+
+volumes:
+  agrisystem_mysql_data:
+    name: agrisystem_mysql_data
+  agrisystem_uploads:
+    name: agrisystem_uploads

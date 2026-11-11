@@ -54,3 +54,48 @@ The `014_google_sign_in.sql` migration adds a unique `users.google_sub` column t
 - Farmer: farm profile and land, crop-damage reports, notifications, and report history.
 - MAO staff and technicians: report review and operations dashboards.
 - LGU administrators: farmer registration review, user management, and system controls.
+
+## AGriSystem Docker Setup
+
+This is a separate local development stack. It uses its own MySQL database and never reads the production Railway connection values from the root .env file.
+
+### Prerequisites
+
+- Docker Desktop for Windows, running with the Linux container engine.
+- Git and this AgriSystem project.
+
+### Environment variables
+
+The project already uses the root .env file for local development and deployment-related settings. Leave that file unchanged. For Docker, create a separate local settings file:
+
+    Copy-Item .env.docker.example .env.docker
+
+Edit .env.docker and replace the example passwords/secrets with new, local-only values. Add optional integration keys only to this file. Do not copy production database credentials into this file. The .env.docker file is ignored by Git and excluded from Docker build contexts.
+
+### Build and start
+
+Open PowerShell in the project root, then run:
+
+    docker compose --env-file .env.docker up --build -d
+
+The backend applies pending SQL migrations to the dedicated local database before starting. Existing Railway and Vercel deployments are not changed.
+
+### Local URLs
+
+- AgriSystem frontend: http://localhost:3001
+- Backend health check: http://localhost:5001/health
+- phpMyAdmin: http://localhost:8082
+
+phpMyAdmin uses the local MySQL service. Sign in with the local database username/password in .env.docker. MySQL itself is available only inside the Docker network and has no published host port.
+
+### Status, logs, and shutdown
+
+    docker compose --env-file .env.docker ps
+    docker compose --env-file .env.docker logs -f
+    docker compose --env-file .env.docker down
+
+The normal shutdown command preserves the local database and uploaded files. Do not add -v to down unless you intentionally want to delete the local Docker volumes and their data.
+
+### Docker Desktop verification
+
+In Docker Desktop, open Containers. The agrisystem project should show four services: agrisystem-frontend, agrisystem-backend, agrisystem-mysql, and agrisystem-phpmyadmin. MySQL must report healthy, then the backend and frontend should become healthy/running. Open the URLs above to verify the frontend, API health, and database manager.

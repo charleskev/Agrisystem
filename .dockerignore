@@ -1,0 +1,27 @@
+.git
+.git/**
+.vscode
+node_modules
+**/node_modules
+client/android
+client/dist
+server/uploads/*
+!server/uploads/.gitkeep
+.env
+.env.*
+!.env.example
+!.env.docker.example
+*.log
+**/*.log
+Damage Monitoring and Tracking System Models.docx
+damage-inspection
+damage-monitoring-tracking
+electron
+__tests__
+bin
+controllers
+middleware
+models
+public
+routes
+views
