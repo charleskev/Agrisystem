@@ -1,15 +1,11 @@
 import crypto from "crypto";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import { Router } from "express";
 import multer from "multer";
+import { uploadPathFor } from "../../config/uploads.js";
 import { detect, history, remove, status } from "../controllers/cropDetectionController.js";
 import { authenticate, allowRoles } from "../middleware/auth.js";
 
-const routeDirectory = path.dirname(fileURLToPath(import.meta.url));
-const uploadDirectory = path.resolve(routeDirectory, "../../../uploads/crop-detections");
-fs.mkdirSync(uploadDirectory, { recursive: true });
+const uploadDirectory = uploadPathFor("crop-detections");
 const extensionFor = mimeType => ({ "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp" }[mimeType] || ".jpg");
 const upload = multer({
   storage: multer.diskStorage({ destination: (_req, _file, callback) => callback(null, uploadDirectory), filename: (_req, file, callback) => callback(null, `${crypto.randomUUID()}${extensionFor(file.mimetype)}`) }),

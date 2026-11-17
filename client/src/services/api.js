@@ -1,4 +1,12 @@
-const API_URL = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
+const configuredApiUrl = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
+
+function isLoopbackHost(hostname) { return ["localhost", "127.0.0.1", "[::1]", "::1"].includes(hostname); }
+
+export function apiUrl(path) {
+  const localFrontend = typeof window !== "undefined" && isLoopbackHost(window.location.hostname);
+  const apiRoot = localFrontend ? "/api" : configuredApiUrl;
+  return `${apiRoot}${path}`;
+}
 
 function networkMessage(error) {
   if (error?.name === "AbortError" || error?.name === "TimeoutError") return "The request took too long. Check your connection and try again.";
@@ -9,7 +17,7 @@ export async function api(path, { token, ...options } = {}) {
   const isFormData = options.body instanceof FormData;
   let response;
   try {
-    response = await fetch(`${API_URL}${path}`, {
+    response = await fetch(apiUrl(path), {
       ...options,
       headers: { ...(isFormData ? {} : { "Content-Type": "application/json" }), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers }
     });

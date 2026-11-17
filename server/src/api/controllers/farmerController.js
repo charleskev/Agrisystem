@@ -24,14 +24,17 @@ export async function myProfile(req, res, next) {
   try { const profile = await getFarmerByUserId(req.user.id); res.json({ profile, lands: profile ? await listLandsByFarmer(profile.id) : [] }); } catch (error) { next(error); }
 }
 export async function addLand(req, res, next) {
+  let keepUpload = false;
   try {
     const profile = await getFarmerByUserId(req.user.id);
     if (!profile) return res.status(404).json({ message: "Farmer profile was not found." });
     const mapping = mappingFromBody(req.body);
-    const land = await createLand({ ...req.body, farmerId: profile.id, cropTypes: cropTypesFromBody(req.body.cropTypes), ...(mapping ? { mapping, latitude: mapping.latitude, longitude: mapping.longitude, sizeHectares: mapping.areaHectares } : {}), ownershipProofFile: req.file ? `/uploads/${req.file.filename}` : null });
+    const land = await createLand({ ...req.body, farmerId: profile.id, cropTypes: cropTypesFromBody(req.body.cropTypes), ...(mapping ? { mapping, latitude: mapping.latitude, longitude: mapping.longitude, sizeHectares: mapping.areaHectares } : {}), ownershipProofFile: req.file ? `/uploads/${req.file.filename}` : null, ownershipProofMimeType: req.file?.mimetype, ownershipProofOriginalName: req.file?.safeOriginalName });
+    keepUpload = Boolean(req.file);
     publishRealtimeUpdate("land.created");
     res.status(201).json({ land });
   } catch (error) { next(error); }
+  finally { if (req.file && !keepUpload) await fs.unlink(req.file.path).catch(() => {}); }
 }
 export async function editLand(req, res, next) {
   try {
@@ -96,3 +99,4 @@ export async function reviewRegistration(req, res, next) {
     res.json({ farmer });
   } catch (error) { next(error); }
 }
+import fs from "fs/promises";

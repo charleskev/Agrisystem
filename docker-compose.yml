@@ -30,6 +30,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 4000
+      UPLOADS_DIR: /app/uploads
       CLIENT_ORIGIN: "http://localhost:5173,http://localhost:${DOCKER_FRONTEND_PORT:-3001},http://127.0.0.1:${DOCKER_FRONTEND_PORT:-3001}"
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
@@ -62,6 +63,7 @@ services:
       dockerfile: client/Dockerfile
       args:
         VITE_API_URL: /api
+        VITE_MAPBOX_PUBLIC_TOKEN: ${VITE_MAPBOX_PUBLIC_TOKEN:-}
     container_name: agrisystem-frontend
     restart: unless-stopped
     depends_on:

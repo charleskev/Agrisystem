@@ -9,7 +9,9 @@ COPY client/ ./
 
 # Docker serves the SPA and proxies API calls through Nginx to the backend.
 ARG VITE_API_URL=/api
+ARG VITE_MAPBOX_PUBLIC_TOKEN=
 ENV VITE_API_URL=${VITE_API_URL}
+ENV VITE_MAPBOX_PUBLIC_TOKEN=${VITE_MAPBOX_PUBLIC_TOKEN}
 RUN npm run build
 
 FROM nginx:1.27-alpine

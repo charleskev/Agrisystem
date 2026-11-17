@@ -1,6 +1,6 @@
 # AgriSystem foundation
 
-AgriSystem is split into a phone-first React client and an Express API. PostgreSQL is the system of record. Uploaded ownership documents and report photographs are stored locally in `server/uploads` during development and can later be redirected to an S3-compatible service.
+AgriSystem is split into a phone-first React client and an Express API. MySQL is the system of record. Farmer uploads use the configured `UPLOADS_DIR`; local development defaults to `server/uploads`, while Docker mounts a persistent volume at `/app/uploads`. Files are read through authenticated `/api/files` routes that check the farmer or staff role before access.
 
 ## Folder layout
 
@@ -17,7 +17,7 @@ server/                         Express API
     routes/                     Feature endpoints
     services/                   Gemini vision, weather, notifications
   db/migrations/                Versioned PostgreSQL schema
-  uploads/                      Development-only local uploads
+  uploads/                      Local upload storage (override with UPLOADS_DIR)
 docs/                           Architecture and implementation notes
 ```
 

@@ -15,8 +15,14 @@ function hydrate(row) {
     possible_issues: json(row.possible_issues) || [],
     recommendations: json(row.recommendations) || [],
     analysis: json(row.analysis_json),
-    image_url: row.image_file,
+    image_url: `/files/crop-detections/${row.id}/image`,
   };
+}
+
+function privateSafeDetection(row) {
+  if (!row) return row;
+  const { image_file, ...safe } = row;
+  return safe;
 }
 
 export async function createCropDetection(values, db = pool) {
@@ -67,7 +73,7 @@ export async function listCropDetections(farmerId, search = "") {
       AND (d.crop_name LIKE ? OR d.scientific_name LIKE ? OR l.name LIKE ? OR l.barangay LIKE ?)
     ORDER BY d.created_at DESC, d.id DESC
   `, [farmerId, value, value, value, value]);
-  return rows.map(hydrate);
+  return rows.map(row => privateSafeDetection(hydrate(row)));
 }
 
 export async function deleteCropDetection(farmerId, id) {

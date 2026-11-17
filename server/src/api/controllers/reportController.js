@@ -44,7 +44,7 @@ export async function submitReport(req, res, next) {
       return res.status(409).json({ message: `This same farm image was already submitted as report #${duplicate.id}. Open My Reports to avoid duplicate submissions.` });
     }
     const capturedAt = new Date().toISOString().slice(0, 19).replace("T", " ");
-    const photos = uploadedFiles.map(file => ({ fileUrl: `/uploads/${file.filename}`, latitude: req.body.latitude, longitude: req.body.longitude, capturedAt }));
+    const photos = uploadedFiles.map(file => ({ fileUrl: `/uploads/${file.filename}`, mimeType: file.mimetype, originalName: file.safeOriginalName, latitude: req.body.latitude, longitude: req.body.longitude, capturedAt }));
     if (detection) photos.unshift({ fileUrl: detection.image_file, latitude: req.body.latitude, longitude: req.body.longitude, capturedAt: detection.created_at });
     const analysis = detection?.analysis || null;
     const report = await createReport({ ...req.body, landId: land.id, farmerId: profile.id, cropDetectionId: detection?.id || null, aiPlant: detection?.crop_name || req.body.aiPlant, aiDamageType: analysis?.possibleDamageType || req.body.aiDamageType, aiConfidenceNotes: detection ? `${Math.round(Number(detection.confidence || 0) * 100)}% crop identification confidence` : req.body.aiConfidenceNotes, aiAnalysis: analysis || req.body.aiAnalysis, confirmedPlant: req.body.confirmedPlant, confirmedDamageType: req.body.confirmedDamageType, photos, submissionFingerprint });

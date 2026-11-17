@@ -1,5 +1,6 @@
 .env
 .env.docker
+client/.env.local
 node_modules/
 client/dist/
 server/uploads/*

@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
-
-const API_ROOT = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
+import { apiUrl } from "../services/api.js";
 
 // Uses an authenticated SSE stream for instant updates and a quiet fallback
 // refresh in case the device temporarily loses the event connection.
@@ -22,7 +21,7 @@ export default function useRealtimeRefresh(token, refresh) {
     const connect = async () => {
       controller = new AbortController();
       try {
-        const response = await fetch(`${API_ROOT}/realtime/events`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal });
+        const response = await fetch(apiUrl("/realtime/events"), { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal });
         if (!response.ok || !response.body) throw new Error("Realtime connection unavailable");
         const reader = response.body.getReader();
         const decoder = new TextDecoder();

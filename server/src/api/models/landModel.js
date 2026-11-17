@@ -4,7 +4,16 @@ const parseJson = value => {
   if (value == null || typeof value === "object") return value;
   try { return JSON.parse(value); } catch { return null; }
 };
-const hydrate = land => ({ ...land, crop_types: parseJson(land.crop_types) || [], boundary_geojson: parseJson(land.boundary_geojson) });
+const hydrate = land => {
+  if (!land) return land;
+  const { ownership_proof_file, ...safeLand } = land;
+  return {
+    ...safeLand,
+    ownership_proof_url: ownership_proof_file ? `/files/lands/${land.id}/ownership-proof` : null,
+    crop_types: parseJson(land.crop_types) || [],
+    boundary_geojson: parseJson(land.boundary_geojson),
+  };
+};
 
 async function recordMeasurement(db, landId, mapping) {
   if (!mapping) return;
@@ -14,14 +23,14 @@ async function recordMeasurement(db, landId, mapping) {
   );
 }
 
-export async function createLand({ farmerId, name, address, barangay, municipality, province, region, latitude, longitude, sizeHectares, cropTypes, ownershipProofFile, mapping, notes }, db = pool) {
+export async function createLand({ farmerId, name, address, barangay, municipality, province, region, latitude, longitude, sizeHectares, cropTypes, ownershipProofFile, ownershipProofMimeType, ownershipProofOriginalName, mapping, notes }, db = pool) {
   const connection = db === pool ? await pool.getConnection() : null;
   const query = connection || db;
   try {
     if (connection) await connection.beginTransaction();
     const [result] = await query.query(
-      "INSERT INTO lands (farmer_id, name, address, barangay, municipality, province, region, latitude, longitude, size_hectares, crop_types, ownership_proof_file, boundary_geojson, area_square_meters, area_acres, perimeter_meters, walking_distance_meters, gps_accuracy_m, measurement_quality, mapped_at, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [farmerId, name || null, address || null, barangay || null, municipality || null, province || null, region || null, latitude, longitude, sizeHectares, JSON.stringify(cropTypes || []), ownershipProofFile || null, mapping ? JSON.stringify(mapping.boundaryGeojson) : null, mapping?.areaSquareMeters ?? null, mapping?.areaAcres ?? null, mapping?.perimeterMeters ?? null, mapping?.walkingDistanceMeters ?? null, mapping?.gpsAccuracyM ?? null, mapping?.quality ?? null, mapping ? new Date() : null, notes || null]
+      "INSERT INTO lands (farmer_id, name, address, barangay, municipality, province, region, latitude, longitude, size_hectares, crop_types, ownership_proof_file, ownership_proof_mime_type, ownership_proof_original_name, ownership_proof_uploaded_at, boundary_geojson, area_square_meters, area_acres, perimeter_meters, walking_distance_meters, gps_accuracy_m, measurement_quality, mapped_at, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [farmerId, name || null, address || null, barangay || null, municipality || null, province || null, region || null, latitude, longitude, sizeHectares, JSON.stringify(cropTypes || []), ownershipProofFile || null, ownershipProofMimeType || null, ownershipProofOriginalName || null, ownershipProofFile ? new Date() : null, mapping ? JSON.stringify(mapping.boundaryGeojson) : null, mapping?.areaSquareMeters ?? null, mapping?.areaAcres ?? null, mapping?.perimeterMeters ?? null, mapping?.walkingDistanceMeters ?? null, mapping?.gpsAccuracyM ?? null, mapping?.quality ?? null, mapping ? new Date() : null, notes || null]
     );
     await recordMeasurement(query, result.insertId, mapping);
     const [rows] = await query.query("SELECT * FROM lands WHERE id = ?", [result.insertId]);

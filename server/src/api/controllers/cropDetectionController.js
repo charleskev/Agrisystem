@@ -1,15 +1,14 @@
 ﻿import crypto from "crypto";
 import fs from "fs/promises";
 import path from "path";
-import { fileURLToPath } from "url";
 import { getFarmerByUserId } from "../models/farmerModel.js";
 import { listLandsByFarmer } from "../models/landModel.js";
 import { createCropDetection, deleteCropDetection, findCropDetectionByFingerprint, listCropDetections } from "../models/cropDetectionModel.js";
 import { cropInformation, farmInformation } from "../services/cropKnowledge.js";
 import { identifyCropDamage, visionProviderStatus } from "../services/visionService.js";
+import { uploadPathFor } from "../../config/uploads.js";
 
-const apiDirectory = path.dirname(fileURLToPath(import.meta.url));
-const cropUploadsDirectory = path.resolve(apiDirectory, "../../../uploads/crop-detections");
+const cropUploadsDirectory = uploadPathFor("crop-detections");
 const cropConfidenceThreshold = 0.7;
 const analysisCacheLifetimeMs = 10 * 60 * 1000;
 const inFlightScans = new Map();
@@ -29,7 +28,8 @@ function primaryCrop(analysis) {
 }
 
 function responseFor({ detection, analysis, cropInfo, farmInfo, provider }) {
-  return { detection, analysis, cropInfo, farmInfo, provider, modelUsed: analysis?.modelName || provider.model, confidenceThreshold: cropConfidenceThreshold };
+  const { image_file, ...safeDetection } = detection;
+  return { detection: safeDetection, analysis, cropInfo, farmInfo, provider, modelUsed: analysis?.modelName || provider.model, confidenceThreshold: cropConfidenceThreshold };
 }
 
 function resultFor({ detection, analysis, farmer, land, provider }) {

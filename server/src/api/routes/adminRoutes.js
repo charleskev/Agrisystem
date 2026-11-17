@@ -11,6 +11,20 @@ const router = Router();
 const parseJsonValue = (value, fallback) => { if (value == null || typeof value === "object") return value ?? fallback; try { return JSON.parse(value); } catch { return fallback; } };
 router.use(authenticate, allowRoles("admin", "staff"));
 router.get("/registrations", registrations);
+router.patch("/lands/:id/document-review", async (req, res, next) => { try {
+  const { status, remarks = "" } = req.body;
+  if (!["pending", "verified", "rejected"].includes(status)) return res.status(422).json({ message: "Document status must be Pending, Verified, or Rejected." });
+  if (String(remarks).length > 2000) return res.status(422).json({ message: "Document review notes must be 2,000 characters or fewer." });
+  const [result] = await pool.query("UPDATE lands SET ownership_proof_status = ?, ownership_proof_reviewed_by = ?, ownership_proof_reviewed_at = IF(? = 'pending', NULL, NOW()), ownership_proof_review_notes = ? WHERE id = ? AND ownership_proof_file IS NOT NULL", [status, req.user.id, status, String(remarks).trim() || null, req.params.id]);
+  if (!result.affectedRows) {
+    const [[land]] = await pool.query("SELECT id, ownership_proof_file FROM lands WHERE id = ?", [req.params.id]);
+    if (!land) return res.status(404).json({ message: "Farm record was not found." });
+    return res.status(409).json({ message: "This farm has no uploaded land document to review." });
+  }
+  await pool.query("INSERT INTO admin_audit_logs (actor_id, action, target_type, target_id, details) VALUES (?, 'land.document_reviewed', 'land', ?, ?)", [req.user.id, String(req.params.id), JSON.stringify({ status, remarks: String(remarks).trim() || null })]);
+  publishRealtimeUpdate("land.document_reviewed");
+  res.json({ message: "Land document review saved.", status });
+} catch (error) { next(error); } });
 router.get("/review-indicators", async (req, res, next) => { try { res.json(await getNewReviewCounts(req.user.id)); } catch (error) { next(error); } });
 router.post("/review-indicators/:type/mark-seen", async (req, res, next) => { try { const counts = await markReviewItemsSeen(req.user.id, req.params.type); if (!counts) return res.status(422).json({ message: "Unknown review queue." }); res.json({ counts }); } catch (error) { next(error); } });
 router.get("/registrations/:id", farmerDirectoryDetail);

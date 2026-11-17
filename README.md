@@ -72,6 +72,23 @@ The project already uses the root .env file for local development and deployment
 
 Edit .env.docker and replace the example passwords/secrets with new, local-only values. Add optional integration keys only to this file. Do not copy production database credentials into this file. The .env.docker file is ignored by Git and excluded from Docker build contexts.
 
+### GPS farm satellite map
+
+The GPS Farm Mapping page uses Mapbox Satellite when `VITE_MAPBOX_PUBLIC_TOKEN` contains a valid public token. Without a token it loads Esri World Imagery with Esri attribution, capped at native zoom 18 for the configured Bongabong view so the map does not enlarge unavailable higher-level tiles. Confirm Esri's applicable usage terms for your deployment before release.
+
+The map layer switch also offers an OpenStreetMap clean street map with road and place labels. It uses the standard raster tile service without an API key and displays OpenStreetMap attribution. Follow the [tile usage policy](https://operations.osmfoundation.org/policies/tiles/): the public tile service is best-effort, requires normal interactive use and caching, and does not allow bulk tile downloads or offline prefetching. Use a contracted tile provider if the app's traffic requires a service guarantee.
+
+Mapbox setup is optional. To use Mapbox instead, create a restricted public read-only token for AgriSystem, limited to the required styles, fonts, and tiles. Restrict allowed URLs to the local development origin and production app origin. Capacitor Android uses `https://localhost` by default; include that origin for the installed app. Do not use or place an `sk.*` secret token in the client.
+
+For local Vite development, copy `client/.env.example` to `client/.env.local`, set `VITE_MAPBOX_PUBLIC_TOKEN=pk...` to opt into Mapbox, then restart the frontend. The client build embeds this public token, so it is visible to users and must be restricted in the Mapbox account. For Docker, set the variable in the ignored `.env.docker` file and rebuild the frontend with `docker compose --env-file .env.docker up --build -d`. Check [Mapbox pricing](https://www.mapbox.com/pricing) before release; Mapbox GL JS counts a map load on initialization, and satellite tile requests are included in that map load.
+
+To build and sync the Android assets after setting the token, run from `client`:
+
+    npm run build
+    npx cap sync android
+
+Install the synced app on an Android phone to verify the satellite tiles, attribution, zoom buttons, pinch zoom, panning, full-screen control, GPS permission, follow mode, walking trace, area estimate, saving, and reopening an existing farm. Field imagery detail and date vary by location; verify the actual farm area before relying on it.
+
 ### Build and start
 
 Open PowerShell in the project root, then run:
@@ -99,3 +116,9 @@ The normal shutdown command preserves the local database and uploaded files. Do 
 ### Docker Desktop verification
 
 In Docker Desktop, open Containers. The agrisystem project should show four services: agrisystem-frontend, agrisystem-backend, agrisystem-mysql, and agrisystem-phpmyadmin. MySQL must report healthy, then the backend and frontend should become healthy/running. Open the URLs above to verify the frontend, API health, and database manager.
+
+### Farmer document storage
+
+The API stores uploads under `UPLOADS_DIR`, defaulting to `server/uploads` in local development. Docker sets it to `/app/uploads` and mounts the persistent `agrisystem_uploads` volume there. Keep the volume when recreating containers.
+
+Railway's service filesystem is ephemeral outside an attached volume. Attach a persistent volume to the backend service at `/app/uploads` and set `UPLOADS_DIR=/app/uploads` before relying on Railway for farmer documents. Railway volumes are mounted as root; for this Node image, set `RAILWAY_RUN_UID=0` so the mounted directory is writable. Before attaching a new volume over the current upload directory, copy any existing production uploads into that volume so older documents remain available. See [Railway volume setup](https://docs.railway.com/volumes).

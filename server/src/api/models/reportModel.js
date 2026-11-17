@@ -80,7 +80,7 @@ export async function createReport({ landId, farmerId, cropDetectionId, incident
       [landId, cropDetectionId || null, farmerId, incidentBarangay || null, incidentOccurredAt || null, detectedPlant, savedDamage, analysis?.damageSeverity === "Unknown" ? null : analysis?.damageSeverity || null, analysis ? analysis.damageConfidence : null, analysis?.affectedAreaEstimate || null, analysis?.affectedPlantCount || null, aiConfidenceNotes || null, analysisJson, analysis ? new Date() : null, sceneObjects.length ? JSON.stringify(sceneObjects) : null, confirmedPlant || null, confirmedDamageType || null, ["Low", "Moderate", "High", "Critical"].includes(reportedSeverity) ? reportedSeverity : null, cleanText(reportedAffectedArea, "", 180) || null, farmerNotes || null, submissionFingerprint || null]
     );
     for (const photo of photos || []) {
-      const [photoResult] = await connection.query("INSERT INTO report_photos (damage_report_id, file_url, latitude, longitude, captured_at) VALUES (?, ?, ?, ?, ?)", [result.insertId, photo.fileUrl, photo.latitude || null, photo.longitude || null, photo.capturedAt || null]);
+      const [photoResult] = await connection.query("INSERT INTO report_photos (damage_report_id, file_url, mime_type, original_name, latitude, longitude, captured_at) VALUES (?, ?, ?, ?, ?, ?, ?)", [result.insertId, photo.fileUrl, photo.mimeType || null, photo.originalName || null, photo.latitude || null, photo.longitude || null, photo.capturedAt || null]);
       if (confirmedPlant && confirmedDamageType) await connection.query("INSERT INTO damage_training_samples (report_id, report_photo_id, crop_type, damage_type, scene_objects) VALUES (?, ?, ?, ?, ?)", [result.insertId, photoResult.insertId, confirmedPlant, confirmedDamageType, sceneObjects.length ? JSON.stringify(sceneObjects) : null]);
     }
     await connection.commit();
@@ -89,29 +89,34 @@ export async function createReport({ landId, farmerId, cropDetectionId, incident
   } catch (error) { await connection.rollback(); throw error; } finally { connection.release(); }
 }
 
-export async function listReports({ farmerId, status, barangay, cropType, damageType, severity, from, to, landId } = {}) {
+export async function listReports({ farmerId, status, barangay, cropType, damageType, category, severity, from, to, landId, search } = {}) {
   const clauses = [], values = [], add = (sql, value) => { clauses.push(sql); values.push(value); };
   if (farmerId) add("dr.farmer_id = ?", farmerId);
   if (status) add("dr.status = ?", status);
   if (barangay) add("COALESCE(NULLIF(dr.incident_barangay, ''), l.barangay) = ?", barangay);
   if (cropType) add("JSON_CONTAINS(l.crop_types, JSON_QUOTE(?))", cropType);
-  if (damageType) add("COALESCE(dr.confirmed_damage_type, dr.ai_detected_damage_type) = ?", damageType);
+  if (damageType || category) add("COALESCE(dr.confirmed_damage_type, dr.ai_detected_damage_type) = ?", damageType || category);
   if (severity) add("dr.ai_damage_severity = ?", severity);
   if (from) add("dr.created_at >= ?", from);
   if (to) add("dr.created_at <= ?", to);
   if (landId) add("dr.land_id = ?", landId);
-  const [reports] = await pool.query(`SELECT dr.*, l.name AS land_name, l.size_hectares AS mapped_farm_area_hectares, l.area_square_meters AS mapped_farm_area_square_meters, l.area_acres AS mapped_farm_area_acres, l.boundary_geojson, l.perimeter_meters AS farm_perimeter_meters, l.measurement_quality, COALESCE(NULLIF(dr.incident_barangay, ''), l.barangay) AS barangay, l.latitude, l.longitude, l.crop_types, u.full_name AS farmer_name, u.contact_number FROM damage_reports dr JOIN lands l ON l.id = dr.land_id JOIN farmer_profiles fp ON fp.id = dr.farmer_id JOIN users u ON u.id = fp.user_id ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""} ORDER BY dr.created_at DESC`, values);
+  if (search) {
+    const term = `%${String(search).trim().slice(0, 120)}%`;
+    clauses.push("(u.full_name LIKE ? OR u.contact_number LIKE ? OR u.email LIKE ? OR l.name LIKE ? OR dr.confirmed_plant LIKE ? OR dr.ai_detected_plant LIKE ? OR dr.confirmed_damage_type LIKE ? OR dr.ai_detected_damage_type LIKE ? OR dr.farmer_notes LIKE ?)");
+    values.push(...Array(9).fill(term));
+  }
+  const [reports] = await pool.query(`SELECT dr.*, l.name AS land_name, l.size_hectares AS mapped_farm_area_hectares, l.area_square_meters AS mapped_farm_area_square_meters, l.area_acres AS mapped_farm_area_acres, l.boundary_geojson, l.perimeter_meters AS farm_perimeter_meters, l.measurement_quality, COALESCE(NULLIF(dr.incident_barangay, ''), l.barangay) AS barangay, l.latitude, l.longitude, l.crop_types, u.full_name AS farmer_name, u.contact_number, u.email AS farmer_email FROM damage_reports dr JOIN lands l ON l.id = dr.land_id JOIN farmer_profiles fp ON fp.id = dr.farmer_id JOIN users u ON u.id = fp.user_id ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""} ORDER BY dr.created_at DESC`, values);
   if (!reports.length) return [];
   const ids = reports.map(report => report.id);
   const [photos, samples, history, scans] = await Promise.all([
-    pool.query(`SELECT id, damage_report_id, file_url AS fileUrl, latitude, longitude, captured_at AS capturedAt FROM report_photos WHERE damage_report_id IN (${ids.map(() => "?").join(",")})`, ids).then(([rows]) => rows),
+    pool.query(`SELECT id, damage_report_id, mime_type AS mimeType, original_name AS originalName, latitude, longitude, captured_at AS capturedAt FROM report_photos WHERE damage_report_id IN (${ids.map(() => "?").join(",")})`, ids).then(([rows]) => rows),
     pool.query(`SELECT id, report_id, report_photo_id, crop_type, damage_type, scene_objects, label_status FROM damage_training_samples WHERE report_id IN (${ids.map(() => "?").join(",")})`, ids).then(([rows]) => rows),
     pool.query(`SELECT h.*, u.full_name AS staff_name FROM damage_report_review_history h LEFT JOIN users u ON u.id = h.staff_user_id WHERE h.report_id IN (${ids.map(() => "?").join(",")}) ORDER BY h.created_at DESC, h.id DESC`, ids).then(([rows]) => rows),
-    pool.query(`SELECT d.id, d.land_id, d.crop_name, d.scientific_name, d.confidence, d.image_file, d.analysis_json, d.created_at FROM crop_detections d JOIN damage_reports dr ON dr.crop_detection_id = d.id WHERE dr.id IN (${ids.map(() => "?").join(",")})`, ids).then(([rows]) => rows)
+    pool.query(`SELECT d.id, d.land_id, d.crop_name, d.scientific_name, d.confidence, d.analysis_json, d.created_at FROM crop_detections d JOIN damage_reports dr ON dr.crop_detection_id = d.id WHERE dr.id IN (${ids.map(() => "?").join(",")})`, ids).then(([rows]) => rows)
   ]);
   return reports.map(report => {
     const scan = scans.find(item => String(item.id) === String(report.crop_detection_id));
-    return { ...report, crop_types: parseJson(report.crop_types, []), boundary_geojson: parseJson(report.boundary_geojson, null), camera_scene_objects: cleanSceneObjects(report.camera_scene_objects), ai_analysis: cleanAnalysis(report.ai_analysis), crop_detection: scan ? { ...scan, analysis: parseJson(scan.analysis_json, null), image_url: scan.image_file } : null, photos: photos.filter(photo => String(photo.damage_report_id) === String(report.id)), review_history: history.filter(item => String(item.report_id) === String(report.id)), trainingSamples: samples.filter(sample => String(sample.report_id) === String(report.id)).map(sample => ({ ...sample, scene_objects: cleanSceneObjects(sample.scene_objects) })) };
+    return { ...report, crop_types: parseJson(report.crop_types, []), boundary_geojson: parseJson(report.boundary_geojson, null), camera_scene_objects: cleanSceneObjects(report.camera_scene_objects), ai_analysis: cleanAnalysis(report.ai_analysis), crop_detection: scan ? { ...scan, analysis: parseJson(scan.analysis_json, null), image_url: `/files/crop-detections/${scan.id}/image` } : null, photos: photos.filter(photo => String(photo.damage_report_id) === String(report.id)).map(photo => ({ ...photo, fileUrl: `/files/reports/${report.id}/attachments/${photo.id}` })), review_history: history.filter(item => String(item.report_id) === String(report.id)), trainingSamples: samples.filter(sample => String(sample.report_id) === String(report.id)).map(sample => ({ ...sample, scene_objects: cleanSceneObjects(sample.scene_objects) })) };
   });
 }
 

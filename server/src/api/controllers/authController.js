@@ -1,4 +1,5 @@
 import bcrypt from "bcrypt";
+import fs from "fs/promises";
 import jwt from "jsonwebtoken";
 import { pool } from "../../config/db.js";
 import { createFarmerProfile } from "../models/farmerModel.js";
@@ -23,6 +24,7 @@ const bongabongCenter = { latitude: 12.7517, longitude: 121.4869 };
 
 export async function register(req, res, next) {
   let client;
+  let keepFiles = false;
   try {
     if (await isMaintenanceMode()) return res.status(503).json({ message: "AgriSystem is temporarily in maintenance mode. New registrations are paused." });
     const { fullName, email, password, address, barangay, landName, landAddress, landBarangay, sizeHectares, cropTypes } = req.body;
@@ -38,14 +40,19 @@ export async function register(req, res, next) {
     await client.beginTransaction();
     const user = await createUser({ fullName, contactNumber, email: normalizeEmail(email), passwordHash: await bcrypt.hash(password, 12) }, client);
     const profile = await createFarmerProfile({ userId: user.id, address, barangay, profilePhoto: `/uploads/${req.files.profilePhoto[0].filename}` }, client);
-    const land = await createLand({ farmerId: profile.id, name: landName, address: landAddress || address, barangay: landBarangay || barangay, latitude: bongabongCenter.latitude, longitude: bongabongCenter.longitude, sizeHectares, cropTypes: String(cropTypes).split(",").map(item => item.trim()).filter(Boolean), ownershipProofFile: `/uploads/${req.files.ownershipProof[0].filename}` }, client);
+    const proof = req.files.ownershipProof[0];
+    const land = await createLand({ farmerId: profile.id, name: landName, address: landAddress || address, barangay: landBarangay || barangay, latitude: bongabongCenter.latitude, longitude: bongabongCenter.longitude, sizeHectares, cropTypes: String(cropTypes).split(",").map(item => item.trim()).filter(Boolean), ownershipProofFile: `/uploads/${proof.filename}`, ownershipProofMimeType: proof.mimetype, ownershipProofOriginalName: proof.safeOriginalName }, client);
     await client.commit();
+    keepFiles = true;
     publishRealtimeUpdate("registration.created");
     res.status(201).json({ message: "Farmer account created successfully. Please sign in using your Gmail address or mobile number. Your application will remain pending until MAO Staff review it.", user: { id: user.id, full_name: user.full_name, contact_number: user.contact_number, email: user.email, role: user.role }, profile, land });
   } catch (error) {
     if (client) await client.rollback().catch(() => {});
     next(error);
-  } finally { client?.release(); }
+  } finally {
+    client?.release();
+    if (!keepFiles) await Promise.all(Object.values(req.files || {}).flat().map(file => fs.unlink(file.path).catch(() => {})));
+  }
 }
 
 export async function login(req, res, next) {

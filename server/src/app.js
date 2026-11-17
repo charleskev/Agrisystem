@@ -7,6 +7,7 @@ import { fileURLToPath } from "url";
 import authRoutes from "./api/routes/authRoutes.js";
 import farmerRoutes from "./api/routes/farmerRoutes.js";
 import reportRoutes from "./api/routes/reportRoutes.js";
+import fileRoutes from "./api/routes/fileRoutes.js";
 import notificationRoutes from "./api/routes/notificationRoutes.js";
 import dashboardRoutes from "./api/routes/dashboardRoutes.js";
 import adminRoutes from "./api/routes/adminRoutes.js";
@@ -21,28 +22,35 @@ dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
 const app = express();
 const port = Number(process.env.PORT) || 4000;
+function normalizeOrigin(value) {
+  try { return new URL(value).origin; } catch { return ""; }
+}
+const isProduction = String(process.env.NODE_ENV || "").toLowerCase() === "production";
 const allowedClientOrigins = new Set([
-  ...(process.env.CLIENT_ORIGIN || "http://localhost:5173")
+  ...(process.env.CLIENT_ORIGIN || (isProduction ? "" : "http://localhost:5173"))
     .split(",")
-    .map(origin => origin.trim().replace(/\/+$/, ""))
+    .map(origin => normalizeOrigin(origin.trim()))
     .filter(Boolean),
   // Capacitor serves its bundled Android app from this secure WebView origin.
-  "https://localhost",
-  "capacitor://localhost"
+  normalizeOrigin("https://localhost"),
+  normalizeOrigin("capacitor://localhost")
 ]);
-// Multer runs from the server workspace and stores farmer evidence in server/uploads.
-// Serve that same directory so report photos and registration documents resolve correctly.
-const uploadsPath = path.resolve(__dirname, "../uploads");
+function isLocalDevelopmentOrigin(origin) {
+  if (isProduction) return false;
+  try {
+    const hostname = new URL(origin).hostname;
+    return ["localhost", "127.0.0.1", "[::1]", "::1"].includes(hostname);
+  } catch { return false; }
+}
 const clientDistPath = path.resolve(__dirname, "../../client/dist");
-fs.mkdirSync(uploadsPath, { recursive: true });
 
 app.use(cors({ origin(origin, callback) {
-  if (!origin || allowedClientOrigins.has(origin)) return callback(null, true);
-  return callback(new Error("Origin is not allowed by CORS."));
+  const normalizedOrigin = normalizeOrigin(origin || "");
+  if (!origin || allowedClientOrigins.has(normalizedOrigin) || isLocalDevelopmentOrigin(normalizedOrigin)) return callback(null, true);
+  return callback(Object.assign(new Error("Origin is not allowed by CORS."), { status: 403, code: "CORS_ORIGIN_DENIED", requestOrigin: origin }));
 } }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use("/uploads", express.static(uploadsPath));
 app.get("/health", async (_req, res) => {
   try { await pool.query("SELECT 1"); res.json({ status: "ok", database: "connected" }); }
   catch (error) { res.status(503).json({ status: "degraded", database: "unavailable", message: "MySQL is not available. Start MySQL and run the database migration." }); }
@@ -50,6 +58,7 @@ app.get("/health", async (_req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/farmers", farmerRoutes);
 app.use("/api/reports", reportRoutes);
+app.use("/api/files", fileRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/admin", adminRoutes);
@@ -67,6 +76,10 @@ if (fs.existsSync(clientDistPath)) {
 }
 app.use((_req, res) => res.status(404).json({ message: "API endpoint not found." }));
 app.use((error, _req, res, _next) => {
+  if (error.code === "CORS_ORIGIN_DENIED") {
+    console.warn(`[CORS] Blocked origin ${error.requestOrigin || "(unknown)"}. Configure CLIENT_ORIGIN for this frontend.`);
+    return res.status(403).json({ message: "This frontend origin is not allowed. Configure CLIENT_ORIGIN on the API server." });
+  }
   console.error(error);
   if (error.name === "MulterError") return res.status(422).json({ message: error.message });
   if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") return res.status(503).json({ message: "Database connection failed. Start MySQL, then run npm run migrate in the server folder." });
