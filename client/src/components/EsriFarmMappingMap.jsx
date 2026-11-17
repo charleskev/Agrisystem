@@ -88,12 +88,13 @@ export default function EsriFarmMappingMap({
   }
 
   return (
-    <div ref={containerRef} className="esri-farm-map relative h-full w-full" aria-label="Farm boundary satellite map">
+    <div ref={containerRef} className="esri-farm-map relative h-full w-full" aria-label={cleanMap ? "Clean street map for farm mapping" : "Farm boundary satellite map"}>
       <MapContainer
         center={center}
         zoom={Math.max(3, Math.min(maxZoom, Number(zoom) || 17))}
         minZoom={3}
         maxZoom={maxZoom}
+        zoomControl={true}
         scrollWheelZoom
         touchZoom
         doubleClickZoom
