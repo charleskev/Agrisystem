@@ -6,6 +6,7 @@ import { distanceBetweenPoints, measureBoundary } from "../services/farmGeometry
 
 const defaultMapCenter = [12.74737, 121.48858];
 const defaultMapZoom = 17;
+const maxMappingAccuracyMeters = 15;
 const FarmMappingMap = lazy(() => import("../components/FarmMappingMap.jsx"));
 const EsriFarmMappingMap = lazy(() => import("../components/EsriFarmMappingMap.jsx"));
 const configuredMapboxToken = (import.meta.env.VITE_MAPBOX_PUBLIC_TOKEN || "").trim();
@@ -116,11 +117,12 @@ export default function FarmMappingPage({ token, onLogout }) {
       setGpsRetryAvailable(true); setTrackingStatus("error"); setGpsMessage("The phone returned invalid GPS coordinates. Check location services, then retry."); return;
     }
     setCurrentPosition(next); setAccuracy(nextAccuracy);
-    if (!Number.isFinite(nextAccuracy) || nextAccuracy > 20) {
+    if (!Number.isFinite(nextAccuracy) || nextAccuracy > maxMappingAccuracyMeters) {
       if (boundaryLengthRef.current > 0) { setGpsGapDetected(true); setGapReviewConfirmed(false); }
+      lastAcceptedPosition.current = null;
       setGpsRetryAvailable(true);
-      setTrackingStatus(recording && !paused ? "connecting" : "ready");
-      setGpsMessage(`Device GPS reports ±${Number.isFinite(nextAccuracy) ? nextAccuracy.toFixed(1) : "unknown"} m accuracy. Fixes worse than 20 m are not recorded; try again outdoors or use manual map points.`);
+      setTrackingStatus(recording && !paused ? "weak" : "ready");
+      setGpsMessage(`GPS is too weak to measure reliably (device reports ±${Number.isFinite(nextAccuracy) ? nextAccuracy.toFixed(1) : "unknown"} m). No point was recorded. Move outdoors, enable precise location, and wait for accuracy of ${maxMappingAccuracyMeters} m or better.`);
       return;
     }
     setGpsRetryAvailable(false);
@@ -129,8 +131,11 @@ export default function FarmMappingPage({ token, onLogout }) {
     if (previous) {
       const segmentMeters = distanceBetweenPoints(previous.point, next);
       const elapsedSeconds = Math.max(0.5, (timestamp - previous.timestamp) / 1000);
-      const minimumStep = Math.max(6, Math.min(12, nextAccuracy * 0.5));
-      const maximumStep = Math.max(20, elapsedSeconds * 4 + Math.min(10, (previous.accuracy + nextAccuracy) / 2));
+      // Record boundary corners more often than the old 6–12 m dead zone,
+      // while scaling the noise filter to the device's reported GPS accuracy.
+      const averageAccuracy = (previous.accuracy + nextAccuracy) / 2;
+      const minimumStep = Math.max(3.5, Math.min(6, averageAccuracy * 0.4));
+      const maximumStep = Math.max(15, elapsedSeconds * 3 + Math.min(5, averageAccuracy * 0.4));
       if (segmentMeters < minimumStep) return;
       if (segmentMeters > maximumStep || elapsedSeconds > 45) {
         setGpsGapDetected(true); setGapReviewConfirmed(false);
@@ -162,7 +167,7 @@ export default function FarmMappingPage({ token, onLogout }) {
       if (geoError.code === 1) { setGpsMessage("Location permission was denied. Allow location access in your browser or phone settings, then retry GPS, or use manual map mode."); setTrackingStatus("error"); setRecording(false); }
       else if (geoError.code === 3) { setGpsMessage("GPS is taking too long. Move outdoors and retry, or continue with manual map points."); setTrackingStatus("connecting"); }
       else { setGpsMessage("GPS signal is unavailable. Check your device location setting and retry, or use manual map mode."); setTrackingStatus("error"); }
-    }, { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
+    }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 30000 });
     return () => { if (watchId.current != null) navigator.geolocation?.clearWatch(watchId.current); watchId.current = null; };
   }, [acceptPosition, gpsRetryKey, paused, recording]);
 
@@ -243,7 +248,7 @@ export default function FarmMappingPage({ token, onLogout }) {
     setError(""); setMessage("");
     let result;
     try { result = measureBoundary(boundary); }
-    catch (err) { setMeasurement(null); setError(err.message); setGpsMessage("A valid measurement needs at least three distinct boundary points. Add points manually or retry GPS."); return; }
+    catch (err) { setMeasurement(null); setGpsMessage(`${err.message} Keep mapping until GPS records the boundary, or turn on manual editing to place the corners yourself.`); return; }
     const closingDistance = distanceBetweenPoints(boundary[0], boundary.at(-1));
     const warning = closingDistance > 20 ? " The last point is far from the start, so the closing edge may leave an unrecorded section." : "";
     if (!window.confirm(`Finish this outline and close the boundary to its starting point? The closing edge is ${closingDistance.toFixed(1)} m.${warning} Review the outline on the map before saving.`)) return;
@@ -349,10 +354,10 @@ export default function FarmMappingPage({ token, onLogout }) {
     catch (err) { setError(err.message); }
   }
 
-  const accuracyWarning = accuracy == null ? null : accuracy > 20 ? "GPS uncertainty is high and may materially affect this area estimate." : accuracy > 10 ? "GPS uncertainty may affect the estimate. Review the boundary on the map." : "The reported GPS uncertainty is low, but phone GPS is still not survey-grade.";
+  const accuracyWarning = accuracy == null ? null : accuracy > maxMappingAccuracyMeters ? "GPS uncertainty is too high for reliable mapping. Weak fixes are excluded from the boundary; wait for a better outdoor signal." : accuracy > 10 ? "GPS uncertainty may affect the estimate. Review the boundary on the map." : "The reported GPS uncertainty is low, but phone GPS is still not survey-grade.";
   const recordingDuration = formatDuration(recordingDurationSeconds);
-  const trackingLabel = recording ? paused ? "Paused" : trackingStatus === "recording" ? "Recording" : trackingStatus === "error" ? "GPS unavailable" : "GPS connecting" : trackingStatus === "completed" ? "Completed" : trackingStatus === "ready" ? "GPS ready" : "Not recording";
-  const trackingTone = trackingStatus === "completed" ? "bg-sky-100 text-sky-800" : recording && !paused ? "bg-emerald-100 text-emerald-800" : paused ? "bg-amber-100 text-amber-900" : trackingStatus === "error" ? "bg-red-100 text-red-800" : "bg-slate-100 text-slate-600";
+  const trackingLabel = recording ? paused ? "Paused" : trackingStatus === "recording" ? "Recording" : trackingStatus === "weak" ? "Weak GPS signal" : trackingStatus === "error" ? "GPS unavailable" : "GPS connecting" : trackingStatus === "completed" ? "Completed" : trackingStatus === "ready" ? "GPS ready" : "Not recording";
+  const trackingTone = trackingStatus === "completed" ? "bg-sky-100 text-sky-800" : recording && trackingStatus === "recording" ? "bg-emerald-100 text-emerald-800" : paused || trackingStatus === "weak" ? "bg-amber-100 text-amber-900" : trackingStatus === "error" ? "bg-red-100 text-red-800" : "bg-slate-100 text-slate-600";
   const mapProviderLabel = mapLayer === "clean" ? "OpenStreetMap clean map" : mapboxTokenIsPublic ? "Mapbox Satellite" : "Esri World Imagery";
 
   return <AppShell onLogout={onLogout}><PageHeader eyebrow="Farmer portal" title="GPS farm mapping" description="Walk the farm perimeter or place boundary points on the map. Area, walking distance, and perimeter are estimates from the points you record." action={<button type="button" onClick={() => newFarm()} className={button}>New farm</button>}/>
@@ -381,7 +386,7 @@ export default function FarmMappingPage({ token, onLogout }) {
         <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap"><button type="button" className="min-h-11 rounded-lg bg-emerald-800 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-900 disabled:opacity-50" onClick={recording ? finishMapping : startMapping} disabled={saving}>{recording ? "Finish Mapping" : "Start Mapping"}</button>{recording && <button type="button" className={button} onClick={togglePause}>{paused ? "Resume Mapping" : "Pause Mapping"}</button>}<button type="button" className={button} onClick={undoPoint} disabled={!boundary.length}>Undo point</button><button type="button" className={`${button} ${manualMode ? "border-emerald-800 bg-emerald-800 text-white hover:bg-emerald-900" : ""}`} aria-pressed={manualMode} onClick={toggleManualMode}>{manualMode ? "Manual editing on" : "Add / edit points"}</button><button type="button" className={button} onClick={()=>setMovingPoint(null)} disabled={movingPoint==null}>Done moving point</button><button type="button" className={button} onClick={removeSelectedPoint} disabled={movingPoint==null}>Remove selected point</button><button type="button" className={button} onClick={clearBoundary} disabled={!boundary.length}>Clear boundary</button></div>
         <p role="status" aria-live="polite" className={`mt-3 rounded-lg p-3 text-xs leading-5 ${manualMode ? "bg-emerald-50 text-emerald-900" : "bg-slate-50 text-slate-600"}`}>{manualMode ? "Manual editing is ON: tap the map to add a corner. Select a boundary dot, then tap elsewhere to move it, or remove it." : "Manual editing is OFF. Turn on Add / edit points before tapping the map to add corners."}</p>
         <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-600"><span>GPS accuracy: <b>{accuracy == null ? "Not available" : `±${accuracy.toFixed(1)} m (device reported)`}</b></span><span>GPS coordinates: <b>{currentPosition ? `${currentPosition.latitude.toFixed(6)}, ${currentPosition.longitude.toFixed(6)}` : "Waiting for location"}</b></span><span>Recording time: <b>{recordingDuration}</b></span><span>Boundary points: <b>{boundary.length}</b></span><span>Map points: <b>{manualMode ? "Tap map to add; select a dot to edit it" : "Manual mode off"}</b></span></div>
-        <div className={`mt-2 flex flex-wrap items-center justify-between gap-2 text-xs leading-5 ${accuracy != null && accuracy > 20 || gpsRetryAvailable ? "text-amber-800" : "text-slate-500"}`}><p>{gpsMessage}</p>{gpsRetryAvailable && <button type="button" className={button} onClick={retryGps}>Try GPS Again</button>}</div>
+        <div className={`mt-2 flex flex-wrap items-center justify-between gap-2 text-xs leading-5 ${accuracy != null && accuracy > maxMappingAccuracyMeters || gpsRetryAvailable ? "text-amber-800" : "text-slate-500"}`}><p>{gpsMessage}</p>{gpsRetryAvailable && <button type="button" className={button} onClick={retryGps}>Try GPS Again</button>}</div>
         {gpsGapDetected && <div role="alert" className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs leading-5 text-amber-950"><p className="font-bold">GPS points were skipped because the signal was inaccurate or interrupted.</p><p className="mt-1">Inspect the whole outline. Turn on manual editing to add missing corners or adjust the line across the gap before saving.</p><label className="mt-2 flex items-start gap-2 font-semibold"><input type="checkbox" className="mt-0.5 accent-amber-700" checked={gapReviewConfirmed} onChange={event => setGapReviewConfirmed(event.target.checked)}/><span>I reviewed the map and confirmed the farm outline is complete.</span></label></div>}
       </section>
 

@@ -31,9 +31,9 @@ function clearFlow(flow) {
   document.removeEventListener("visibilitychange", flow.onVisibilityChange);
 }
 
-export default function GoogleSignInButton({ purpose = "login", onLogin, onProfile, onError }) {
+export default function GoogleSignInButton({ purpose = "login", onLogin, onProfile, onCredential, onError }) {
   const hostRef = useRef(null);
-  const latestPropsRef = useRef({ purpose, onLogin, onProfile, onError });
+  const latestPropsRef = useRef({ purpose, onLogin, onProfile, onCredential, onError });
   const flowRef = useRef(null);
   const mountedRef = useRef(false);
   const [config, setConfig] = useState(null);
@@ -42,7 +42,7 @@ export default function GoogleSignInButton({ purpose = "login", onLogin, onProfi
   const [googleLoading, setGoogleLoading] = useState(false);
   const [status, setStatus] = useState("");
 
-  latestPropsRef.current = { purpose, onLogin, onProfile, onError };
+  latestPropsRef.current = { purpose, onLogin, onProfile, onCredential, onError };
 
   useEffect(() => {
     mountedRef.current = true;
@@ -132,8 +132,13 @@ export default function GoogleSignInButton({ purpose = "login", onLogin, onProfi
           body: JSON.stringify({ credential: response.credential })
         });
         if (current.purpose === "login") current.onLogin?.(result);
-        else current.onProfile?.(result.profile);
-        if (mountedRef.current && current.purpose !== "login") setStatus("Google profile loaded.");
+        else {
+          current.onProfile?.(result.profile);
+          if (current.purpose === "register") current.onCredential?.(response.credential);
+        }
+        if (mountedRef.current && current.purpose !== "login") {
+          setStatus(current.purpose === "register" ? "Google account verified. Complete the form to create your farmer account." : "Google profile loaded.");
+        }
       } catch (error) {
         latestPropsRef.current.onError?.(error.message);
         if (mountedRef.current) setStatus("");
